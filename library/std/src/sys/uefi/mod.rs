@@ -14,7 +14,6 @@
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
-#[path = "../unsupported/alloc.rs"]
 pub mod alloc;
 #[path = "../unsupported/args.rs"]
 pub mod args;
@@ -52,3 +51,24 @@ pub mod time;
 #[deny(unsafe_op_in_unsafe_fn)]
 mod common;
 pub use common::*;
+
+pub unsafe fn init(argc: isize, argv: *const *const u8) {
+    use crate::os::uefi;
+    use uefi_spec::efi;
+
+    let args: &[*const u8] = unsafe { crate::slice::from_raw_parts(argv, argc as usize) };
+
+    let handle: efi::Handle = args[0] as efi::Handle;
+    let st: *mut efi::SystemTable = args[1] as *mut efi::SystemTable;
+
+    unsafe { uefi::init_globals(handle, st).unwrap() };
+
+    print_test(st);
+}
+
+fn print_test(st: *mut uefi_spec::efi::SystemTable) {
+    let s = [0x0069u16, 0x006eu16, 0x0069u16, 0x0074u16, 0x000au16, 0x0000u16];
+    unsafe {
+        ((*(*st).con_out).output_string)((*st).con_out, s.as_ptr() as *mut uefi_spec::efi::Char16);
+    }
+}
