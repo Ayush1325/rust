@@ -147,5 +147,8 @@ pub mod solid;
 #[cfg(target_os = "vxworks")]
 pub mod vxworks;
 
+#[cfg(target_os = "uefi")]
+pub mod uefi;
+
 #[cfg(any(unix, target_os = "wasi", doc))]
 mod fd;
