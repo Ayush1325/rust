@@ -38,7 +38,6 @@ pub mod path;
 pub mod pipe;
 #[path = "../unsupported/process.rs"]
 pub mod process;
-#[path = "../unsupported/stdio.rs"]
 pub mod stdio;
 #[path = "../unsupported/thread.rs"]
 pub mod thread;
@@ -47,10 +46,11 @@ pub mod thread_local_key;
 #[path = "../unsupported/time.rs"]
 pub mod time;
 
-#[path = "../unsupported/common.rs"]
-#[deny(unsafe_op_in_unsafe_fn)]
-mod common;
-pub use common::*;
+use crate::io as std_io;
+
+pub mod memchr {
+    pub use core::slice::memchr::{memchr, memrchr};
+}
 
 pub unsafe fn init(argc: isize, argv: *const *const u8) {
     use crate::os::uefi;
@@ -63,12 +63,47 @@ pub unsafe fn init(argc: isize, argv: *const *const u8) {
 
     unsafe { uefi::init_globals(handle, st).unwrap() };
 
-    print_test(st);
+    print_test();
+    // println!("abc");
 }
 
-fn print_test(st: *mut uefi_spec::efi::SystemTable) {
-    let s = [0x0069u16, 0x006eu16, 0x0069u16, 0x0074u16, 0x000au16, 0x0000u16];
-    unsafe {
-        ((*(*st).con_out).output_string)((*st).con_out, s.as_ptr() as *mut uefi_spec::efi::Char16);
-    }
+fn print_test() {
+    use crate::{os::uefi, string::String, vec::Vec};
+    use uefi_spec::protocols::simple_text_output;
+
+    let st = unsafe { uefi::get_system_table().map_err(|_| "help").unwrap() };
+
+    let mut v: Vec<u16>;
+    let s = String::from("Hello\n");
+
+    v = s.encode_utf16().collect();
+    v.push(0);
+    simple_text_output::output_string(st, &mut v).unwrap();
+}
+
+// SAFETY: must be called only once during runtime cleanup.
+// NOTE: this is not guaranteed to run, for example when the program aborts.
+pub unsafe fn cleanup() {}
+
+pub fn unsupported<T>() -> std_io::Result<T> {
+    Err(unsupported_err())
+}
+
+pub fn unsupported_err() -> std_io::Error {
+    std_io::const_io_error!(
+        std_io::ErrorKind::Unsupported,
+        "operation not supported on this platform",
+    )
+}
+
+pub fn decode_error_kind(_code: i32) -> crate::io::ErrorKind {
+    crate::io::ErrorKind::Uncategorized
+}
+
+pub fn abort_internal() -> ! {
+    core::intrinsics::abort();
+}
+
+pub fn hashmap_random_keys() -> (u64, u64) {
+    (1, 2)
 }

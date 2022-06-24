@@ -3,6 +3,7 @@ use crate::os::uefi;
 use uefi_spec::{boot_services::memory_allocation_services, efi};
 
 const POOL_ALIGNMENT: usize = 8;
+const MEMORY_TYPE: u32 = efi::LOADER_DATA;
 
 #[stable(feature = "alloc_system_type", since = "1.28.0")]
 unsafe impl GlobalAlloc for System {
@@ -24,8 +25,7 @@ unsafe impl GlobalAlloc for System {
         let mut ptr: *mut core::ffi::c_void = core::ptr::null_mut();
         let aligned_size = align_size(size, align);
 
-        let r =
-            memory_allocation_services::allocate_pool(st, efi::LOADER_DATA, aligned_size, &mut ptr);
+        let r = memory_allocation_services::allocate_pool(st, MEMORY_TYPE, aligned_size, &mut ptr);
 
         if r.is_err() || ptr.is_null() {
             return core::ptr::null_mut();
