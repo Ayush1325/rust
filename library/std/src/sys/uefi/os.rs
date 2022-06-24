@@ -4,14 +4,16 @@ use crate::ffi::{OsStr, OsString};
 use crate::fmt;
 use crate::io;
 use crate::marker::PhantomData;
+use crate::os::uefi;
 use crate::path::{self, PathBuf};
+use uefi_spec::{boot_services::image_services, efi};
 
 pub fn errno() -> i32 {
-    0
+    efi::Status::ABORTED.as_usize() as i32
 }
 
 pub fn error_string(_errno: i32) -> String {
-    "operation successful".to_string()
+    "ABORTED".to_string()
 }
 
 pub fn getcwd() -> io::Result<PathBuf> {
@@ -97,6 +99,11 @@ pub fn home_dir() -> Option<PathBuf> {
 }
 
 pub fn exit(_code: i32) -> ! {
+    if let (Ok(st), Ok(handle)) =
+        (unsafe { uefi::get_system_table() }, unsafe { uefi::get_system_handle() })
+    {
+        image_services::exit(st, handle, efi::Status::from_usize(_code as usize), &mut [0]);
+    }
     crate::intrinsics::abort()
 }
 

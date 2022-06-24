@@ -20,11 +20,11 @@ pub(crate) unsafe fn init_globals(
 }
 
 #[unstable(feature = "uefi_std", issue = "none")]
-pub unsafe fn get_system_table() -> Result<&'static mut *mut SystemTable, errors::NullPtrError> {
-    GLOBAL_SYSTEM_TABLE.get_mut()
+pub unsafe fn get_system_table() -> Result<*mut SystemTable, errors::NullPtrError> {
+    GLOBAL_SYSTEM_TABLE.load()
 }
 
 #[unstable(feature = "uefi_std", issue = "none")]
-pub unsafe fn get_system_handle() -> Result<&'static mut Handle, errors::NullPtrError> {
-    GLOBAL_SYSTEM_HANDLE.get_mut()
+pub unsafe fn get_system_handle() -> Result<Handle, errors::NullPtrError> {
+    GLOBAL_SYSTEM_HANDLE.load()
 }
