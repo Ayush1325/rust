@@ -102,7 +102,7 @@ pub fn exit(_code: i32) -> ! {
     if let (Ok(st), Ok(handle)) =
         (unsafe { uefi::get_system_table() }, unsafe { uefi::get_system_handle() })
     {
-        image_services::exit(st, handle, efi::Status::from_usize(_code as usize), &mut [0]);
+        let _ = image_services::exit(st, handle, efi::Status::from_usize(_code as usize), &mut [0]);
     }
     crate::intrinsics::abort()
 }
