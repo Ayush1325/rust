@@ -193,7 +193,7 @@ macro_rules! __thread_local_inner {
             //
             // FIXME(#84224) this should come after the `target_thread_local`
             // block.
-            #[cfg(all(target_family = "wasm", not(target_feature = "atomics")))]
+            #[cfg(any(all(target_family = "wasm", not(target_feature = "atomics")), target_os = "uefi"))]
             {
                 static mut VAL: $t = INIT_EXPR;
                 unsafe { $crate::option::Option::Some(&VAL) }
@@ -203,6 +203,7 @@ macro_rules! __thread_local_inner {
             #[cfg(all(
                 target_thread_local,
                 not(all(target_family = "wasm", not(target_feature = "atomics"))),
+                not(target_os = "uefi")
             ))]
             {
                 #[thread_local]
@@ -259,6 +260,7 @@ macro_rules! __thread_local_inner {
             #[cfg(all(
                 not(target_thread_local),
                 not(all(target_family = "wasm", not(target_feature = "atomics"))),
+                not(target_os = "uefi")
             ))]
             {
                 #[inline]

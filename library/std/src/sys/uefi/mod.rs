@@ -26,9 +26,7 @@ pub mod fs;
 pub mod io;
 #[path = "../unsupported/locks/mod.rs"]
 pub mod locks;
-#[path = "../unsupported/net.rs"]
 pub mod net;
-#[path = "../unsupported/os.rs"]
 pub mod os;
 #[path = "../windows/os_str.rs"]
 pub mod os_str;
@@ -47,15 +45,14 @@ pub mod thread_local_key;
 pub mod time;
 
 use crate::io as std_io;
+use crate::os::uefi;
+use uefi_spec::efi;
 
 pub mod memchr {
     pub use core::slice::memchr::{memchr, memrchr};
 }
 
 pub unsafe fn init(argc: isize, argv: *const *const u8) {
-    use crate::os::uefi;
-    use uefi_spec::efi;
-
     let args: &[*const u8] = unsafe { crate::slice::from_raw_parts(argv, argc as usize) };
 
     let handle: efi::Handle = args[0] as efi::Handle;
@@ -68,17 +65,11 @@ pub unsafe fn init(argc: isize, argv: *const *const u8) {
 }
 
 fn print_test() {
-    use crate::{os::uefi, string::String, vec::Vec};
+    use crate::io::Write;
+    use crate::{string::String, vec::Vec};
     use uefi_spec::protocols::simple_text_output;
 
-    let st = unsafe { uefi::get_system_table().map_err(|_| "help").unwrap() };
-
-    let mut v: Vec<u16>;
-    let s = String::from("Hello\n");
-
-    v = s.encode_utf16().collect();
-    v.push(0);
-    simple_text_output::output_string(st, &mut v).unwrap();
+    let _ = stdio::Stdout::new().write("init\n".as_bytes());
 }
 
 // SAFETY: must be called only once during runtime cleanup.
@@ -101,6 +92,14 @@ pub fn decode_error_kind(_code: i32) -> crate::io::ErrorKind {
 }
 
 pub fn abort_internal() -> ! {
+    use uefi_spec::boot_services::image_services;
+
+    if let (Ok(st), Ok(handle)) =
+        (unsafe { uefi::get_system_table() }, unsafe { uefi::get_system_handle() })
+    {
+        let _ = image_services::exit(st, handle, efi::Status::ABORTED, &mut [0]);
+    }
+
     core::intrinsics::abort();
 }
 
