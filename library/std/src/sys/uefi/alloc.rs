@@ -1,6 +1,6 @@
 use crate::alloc::{GlobalAlloc, Layout, System};
 use crate::os::uefi;
-use uefi_spec::{boot_services::memory_allocation_services, efi};
+use r_efi::efi;
 
 const POOL_ALIGNMENT: usize = 8;
 const MEMORY_TYPE: u32 = efi::LOADER_DATA;
@@ -8,13 +8,6 @@ const MEMORY_TYPE: u32 = efi::LOADER_DATA;
 #[stable(feature = "alloc_system_type", since = "1.28.0")]
 unsafe impl GlobalAlloc for System {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let st = unsafe {
-            match uefi::get_system_table() {
-                Ok(x) => x,
-                Err(_) => return core::ptr::null_mut(),
-            }
-        };
-
         let align = layout.align();
         let size = layout.size();
 
@@ -22,12 +15,28 @@ unsafe impl GlobalAlloc for System {
             return core::ptr::null_mut();
         }
 
+        let st = unsafe {
+            match uefi::env::get_system_table() {
+                Ok(x) => x,
+                Err(_) => return core::ptr::null_mut(),
+            }
+        };
+
+        let boot_services = unsafe {
+            match get_boot_services(st) {
+                Ok(x) => x,
+                Err(_) => return core::ptr::null_mut(),
+            }
+        };
+
+        let allocate_pool_ptr = unsafe { (*boot_services).allocate_pool };
+
         let mut ptr: *mut core::ffi::c_void = core::ptr::null_mut();
         let aligned_size = align_size(size, align);
 
-        let r = memory_allocation_services::allocate_pool(st, MEMORY_TYPE, aligned_size, &mut ptr);
+        let r = (allocate_pool_ptr)(MEMORY_TYPE, aligned_size, &mut ptr);
 
-        if r.is_err() || ptr.is_null() {
+        if r.is_error() || ptr.is_null() {
             return core::ptr::null_mut();
         }
 
@@ -35,17 +44,27 @@ unsafe impl GlobalAlloc for System {
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        let st = unsafe {
-            match uefi::get_system_table() {
-                Ok(x) => x,
-                Err(_) => return,
-            }
-        };
-
         if layout.size() != 0 {
+            let st = unsafe {
+                match uefi::env::get_system_table() {
+                    Ok(x) => x,
+                    Err(_) => return,
+                }
+            };
+
+            let boot_services = unsafe {
+                match get_boot_services(st) {
+                    Ok(x) => x,
+                    Err(_) => return,
+                }
+            };
+
+            let free_pool_ptr = unsafe { (*boot_services).free_pool };
+
             let ptr = unsafe { unalign_ptr(ptr, layout.align()) };
-            let r = memory_allocation_services::free_pool(st, ptr.cast());
-            assert!(r.is_ok());
+            let r = (free_pool_ptr)(ptr.cast());
+
+            assert!(!r.is_error());
         }
     }
 }
@@ -93,6 +112,19 @@ unsafe fn unalign_ptr(ptr: *mut u8, align: usize) -> *mut u8 {
         unsafe { core::ptr::read((ptr as *mut Header).offset(-1)).0 }
     } else {
         ptr
+    }
+}
+
+/// Returns error if `BootServices` pointer is null.
+/// SAFETY: `st` pointer must not be null.
+#[inline]
+unsafe fn get_boot_services(st: *mut efi::SystemTable) -> Result<*mut efi::BootServices, ()> {
+    let boot_services = unsafe { (*st).boot_services };
+
+    if boot_services.is_null() {
+        Err(())
+    } else {
+        Ok(boot_services)
     }
 }
 

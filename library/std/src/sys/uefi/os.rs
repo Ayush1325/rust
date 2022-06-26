@@ -6,7 +6,7 @@ use crate::io;
 use crate::marker::PhantomData;
 use crate::os::uefi;
 use crate::path::{self, PathBuf};
-use uefi_spec::{boot_services::image_services, efi};
+use r_efi::efi;
 
 pub fn errno() -> i32 {
     efi::Status::ABORTED.as_usize() as i32
@@ -98,11 +98,18 @@ pub fn home_dir() -> Option<PathBuf> {
     None
 }
 
-pub fn exit(_code: i32) -> ! {
+pub fn exit(code: i32) -> ! {
     if let (Ok(st), Ok(handle)) =
-        (unsafe { uefi::get_system_table() }, unsafe { uefi::get_system_handle() })
+        (unsafe { uefi::env::get_system_table() }, unsafe { uefi::env::get_system_handle() })
     {
-        let _ = image_services::exit(st, handle, efi::Status::from_usize(_code as usize), &mut [0]);
+        let _ = unsafe {
+            ((*(*st).boot_services).exit)(
+                handle,
+                efi::Status::from_usize(code as usize),
+                0,
+                [0].as_mut_ptr(),
+            )
+        };
     }
     crate::intrinsics::abort()
 }

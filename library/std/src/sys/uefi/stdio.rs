@@ -1,8 +1,5 @@
 use crate::{io, os::uefi};
-use uefi_spec::{
-    errors::StatusNullError,
-    protocols::{simple_text_input, simple_text_output},
-};
+use r_efi::protocols::simple_text_output;
 
 pub struct Stdin(());
 pub struct Stdout(());
@@ -15,32 +12,8 @@ impl Stdin {
 }
 
 impl io::Read for Stdin {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let buf_len = buf.len();
-        let mut buf_count = 0;
-
-        let st = unsafe {
-            match uefi::get_system_table() {
-                Ok(x) => x,
-                Err(_) => {
-                    return Err(io::Error::new(io::ErrorKind::NotFound, "Global System Table"))
-                }
-            }
-        };
-
-        // Max 3 bytes can be required to store a ucs2 character as utf8
-        while buf_len - buf_count >= 3 {
-            let ch = match simple_text_input::read_key_stroke(st) {
-                // Need to add check for non-printable keys
-                Ok(x) => x.unicode_char,
-                Err(_) => return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid Key")),
-            };
-
-            let l = utf16_to_utf8_char(ch, &mut buf[buf_count..]);
-            buf_count += l;
-        }
-
-        Ok(buf_count)
+    fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+        Ok(0)
     }
 }
 
@@ -48,12 +21,11 @@ impl Stdout {
     pub const fn new() -> Stdout {
         Stdout(())
     }
-}
 
-impl io::Write for Stdout {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+    // Returns error if `SystemTable->ConOut` is null.
+    unsafe fn get_con_out() -> io::Result<*mut simple_text_output::Protocol> {
         let st = unsafe {
-            match uefi::get_system_table() {
+            match uefi::env::get_system_table() {
                 Ok(x) => x,
                 Err(_) => {
                     return Err(io::Error::new(io::ErrorKind::NotFound, "Global System Table"))
@@ -61,18 +33,31 @@ impl io::Write for Stdout {
             }
         };
 
+        let con_out = unsafe { (*st).con_out };
+
+        if con_out.is_null() {
+            Err(io::Error::new(io::ErrorKind::NotFound, "ConOut"))
+        } else {
+            Ok(con_out)
+        }
+    }
+}
+
+impl io::Write for Stdout {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let con_out = unsafe { Stdout::get_con_out() }?;
+        let output_string_ptr = unsafe { (*con_out).output_string };
+
         let mut output = [0u16; 100];
         let count = utf8_to_utf16(buf, &mut output)?;
         output[count] = 0;
 
-        match simple_text_output::output_string(st, &mut output) {
-            Ok(()) => Ok(count),
-            Err(e) => match e {
-                StatusNullError::NullPtrError(s) => Err(io::Error::new(io::ErrorKind::Other, s)),
-                StatusNullError::UefiWarning(u) | StatusNullError::UefiError(u) => {
-                    Err(io::Error::new(io::ErrorKind::Other, u.to_string()))
-                }
-            },
+        let r = (output_string_ptr)(con_out, output.as_mut_ptr());
+
+        if r.is_error() {
+            Err(io::Error::new(io::ErrorKind::Other, r.as_usize().to_string()))
+        } else {
+            Ok(count)
         }
     }
 
@@ -165,7 +150,7 @@ fn utf8_to_utf16(utf8_buf: &[u8], utf16_buf: &mut [u16]) -> io::Result<usize> {
     Ok(utf16_buf_count)
 }
 
-fn utf16_to_utf8_char(ch: u16, buf: &mut [u8]) -> usize {
+fn _utf16_to_utf8_char(ch: u16, buf: &mut [u8]) -> usize {
     match ch {
         0b0000_0000_0000_0000..0b0000_0000_0111_1111 => {
             // 1-byte

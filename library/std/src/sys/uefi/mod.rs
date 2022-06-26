@@ -46,7 +46,7 @@ pub mod time;
 
 use crate::io as std_io;
 use crate::os::uefi;
-use uefi_spec::efi;
+use r_efi::efi;
 
 pub mod memchr {
     pub use core::slice::memchr::{memchr, memrchr};
@@ -58,16 +58,13 @@ pub unsafe fn init(argc: isize, argv: *const *const u8) {
     let handle: efi::Handle = args[0] as efi::Handle;
     let st: *mut efi::SystemTable = args[1] as *mut efi::SystemTable;
 
-    unsafe { uefi::init_globals(handle, st).unwrap() };
+    unsafe { uefi::env::init_globals(handle, st).unwrap() };
 
     print_test();
-    // println!("abc");
 }
 
 fn print_test() {
     use crate::io::Write;
-    use crate::{string::String, vec::Vec};
-    use uefi_spec::protocols::simple_text_output;
 
     let _ = stdio::Stdout::new().write("init\n".as_bytes());
 }
@@ -91,15 +88,8 @@ pub fn decode_error_kind(_code: i32) -> crate::io::ErrorKind {
     crate::io::ErrorKind::Uncategorized
 }
 
+/// TODO: Check if `exit()` should be used here
 pub fn abort_internal() -> ! {
-    use uefi_spec::boot_services::image_services;
-
-    if let (Ok(st), Ok(handle)) =
-        (unsafe { uefi::get_system_table() }, unsafe { uefi::get_system_handle() })
-    {
-        let _ = image_services::exit(st, handle, efi::Status::ABORTED, &mut [0]);
-    }
-
     core::intrinsics::abort();
 }
 
