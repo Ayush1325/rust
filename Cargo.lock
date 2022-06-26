@@ -5083,10 +5083,10 @@ dependencies = [
  "panic_abort",
  "panic_unwind",
  "profiler_builtins",
+ "r-efi",
  "rand 0.7.3",
  "rustc-demangle",
  "std_detect",
- "uefi_spec",
  "unwind",
  "wasi 0.11.0+wasi-snapshot-preview1",
 ]
@@ -5553,15 +5553,6 @@ name = "ucd-trie"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56dee185309b50d1f11bfedef0fe6d036842e3fb77413abef29f8f8d1c5d4c1c"
-
-[[package]]
-name = "uefi_spec"
-version = "0.1.0"
-dependencies = [
- "compiler_builtins",
- "r-efi",
- "rustc-std-workspace-core",
-]
 
 [[package]]
 name = "ui_test"
