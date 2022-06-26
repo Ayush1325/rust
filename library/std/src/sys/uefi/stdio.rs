@@ -1,5 +1,8 @@
 use crate::{io, os::uefi};
-use uefi_spec::{errors::StatusNullError, protocols::simple_text_output};
+use uefi_spec::{
+    errors::StatusNullError,
+    protocols::{simple_text_input, simple_text_output},
+};
 
 pub struct Stdin(());
 pub struct Stdout(());
@@ -12,8 +15,32 @@ impl Stdin {
 }
 
 impl io::Read for Stdin {
-    fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
-        Ok(0)
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let buf_len = buf.len();
+        let mut buf_count = 0;
+
+        let st = unsafe {
+            match uefi::get_system_table() {
+                Ok(x) => x,
+                Err(_) => {
+                    return Err(io::Error::new(io::ErrorKind::NotFound, "Global System Table"))
+                }
+            }
+        };
+
+        // Max 3 bytes can be required to store a ucs2 character as utf8
+        while buf_len - buf_count >= 3 {
+            let ch = match simple_text_input::read_key_stroke(st) {
+                // Need to add check for non-printable keys
+                Ok(x) => x.unicode_char,
+                Err(_) => return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid Key")),
+            };
+
+            let l = utf16_to_utf8_char(ch, &mut buf[buf_count..]);
+            buf_count += l;
+        }
+
+        Ok(buf_count)
     }
 }
 
@@ -91,6 +118,7 @@ fn utf8_to_utf16(utf8_buf: &[u8], utf16_buf: &mut [u16]) -> io::Result<usize> {
             0b0000_0000..0b0111_1111 => {
                 // 1-byte
                 utf16_buf[utf16_buf_count] = u16::from(utf8_buf[utf8_buf_count]);
+
                 utf8_buf_count += 1;
             }
             0b1100_0000..0b1101_1111 => {
@@ -135,4 +163,32 @@ fn utf8_to_utf16(utf8_buf: &[u8], utf16_buf: &mut [u16]) -> io::Result<usize> {
         }
     }
     Ok(utf16_buf_count)
+}
+
+fn utf16_to_utf8_char(ch: u16, buf: &mut [u8]) -> usize {
+    match ch {
+        0b0000_0000_0000_0000..0b0000_0000_0111_1111 => {
+            // 1-byte
+            buf[0] = ch as u8;
+            1
+        }
+        0b0000_0000_0111_1111..0b0000_0111_1111_1111 => {
+            // 2-byte
+            let a = ((ch & 0b0000_0111_1100_0000) >> 6) as u8;
+            let b = (ch & 0b0000_0000_0011_1111) as u8;
+            buf[0] = a | 0b1100_0000;
+            buf[1] = b | 0b1000_0000;
+            2
+        }
+        _ => {
+            // 3-byte
+            let a = ((ch & 0b1111_0000_0000_0000) >> 12) as u8;
+            let b = ((ch & 0b0000_1111_1100_0000) >> 6) as u8;
+            let c = (ch & 0b0000_0000_0011_1111) as u8;
+            buf[0] = a | 0b1110_0000;
+            buf[1] = b | 0b1000_0000;
+            buf[2] = c | 0b1000_0000;
+            3
+        }
+    }
 }

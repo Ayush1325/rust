@@ -320,7 +320,7 @@ macro_rules! __thread_local_inner {
             unsafe fn __getit(
                 init: $crate::option::Option<&mut $crate::option::Option<$t>>,
             ) -> $crate::option::Option<&'static $t> {
-                #[cfg(all(target_family = "wasm", not(target_feature = "atomics")))]
+                #[cfg(any(all(target_family = "wasm", not(target_feature = "atomics")), target_os = "uefi"))]
                 static __KEY: $crate::thread::__StaticLocalKeyInner<$t> =
                     $crate::thread::__StaticLocalKeyInner::new();
 
@@ -328,6 +328,7 @@ macro_rules! __thread_local_inner {
                 #[cfg(all(
                     target_thread_local,
                     not(all(target_family = "wasm", not(target_feature = "atomics"))),
+                    not(target_os = "uefi")
                 ))]
                 static __KEY: $crate::thread::__FastLocalKeyInner<$t> =
                     $crate::thread::__FastLocalKeyInner::new();
@@ -335,6 +336,7 @@ macro_rules! __thread_local_inner {
                 #[cfg(all(
                     not(target_thread_local),
                     not(all(target_family = "wasm", not(target_feature = "atomics"))),
+                    not(target_os = "uefi")
                 ))]
                 static __KEY: $crate::thread::__OsLocalKeyInner<$t> =
                     $crate::thread::__OsLocalKeyInner::new();
@@ -862,7 +864,7 @@ mod lazy {
 /// On some targets like wasm there's no threads, so no need to generate
 /// thread locals and we can instead just use plain statics!
 #[doc(hidden)]
-#[cfg(all(target_family = "wasm", not(target_feature = "atomics")))]
+#[cfg(any(all(target_family = "wasm", not(target_feature = "atomics")), target_os = "uefi"))]
 pub mod statik {
     use super::lazy::LazyKeyInner;
     use crate::fmt;
