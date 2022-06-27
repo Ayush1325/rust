@@ -44,6 +44,9 @@ pub mod thread_local_key;
 #[path = "../unsupported/time.rs"]
 pub mod time;
 
+#[cfg(test)]
+mod tests;
+
 use crate::io as std_io;
 use crate::os::uefi;
 use r_efi::efi;
@@ -53,20 +56,7 @@ pub mod memchr {
 }
 
 pub unsafe fn init(argc: isize, argv: *const *const u8) {
-    let args: &[*const u8] = unsafe { crate::slice::from_raw_parts(argv, argc as usize) };
-
-    let handle: efi::Handle = args[0] as efi::Handle;
-    let st: *mut efi::SystemTable = args[1] as *mut efi::SystemTable;
-
-    unsafe { uefi::env::init_globals(handle, st).unwrap() };
-
-    print_test();
-}
-
-fn print_test() {
-    use crate::io::Write;
-
-    let _ = stdio::Stdout::new().write("init\n".as_bytes());
+    println!("init");
 }
 
 // SAFETY: must be called only once during runtime cleanup.
@@ -88,11 +78,31 @@ pub fn decode_error_kind(_code: i32) -> crate::io::ErrorKind {
     crate::io::ErrorKind::Uncategorized
 }
 
-/// TODO: Check if `exit()` should be used here
+/// FIXME: Check if `exit()` should be used here
 pub fn abort_internal() -> ! {
     core::intrinsics::abort();
 }
 
 pub fn hashmap_random_keys() -> (u64, u64) {
     (1, 2)
+}
+
+extern "C" {
+    fn main(argc: isize, argv: *const *const u8) -> isize;
+}
+
+#[no_mangle]
+pub unsafe extern "efiapi" fn efi_main(
+    handle: efi::Handle,
+    st: *mut efi::SystemTable,
+) -> efi::Status {
+    let mut msg = [0x0048u16, 0x0065u16, 0x006cu16, 0x006cu16, 0x006fu16, 0x000au16, 0x0000u16];
+    ((*(*st).con_out).output_string)((*st).con_out, msg.as_mut_ptr());
+
+    unsafe { uefi::env::init_globals(handle, st).unwrap() };
+
+    match main(0, crate::ptr::null()) {
+        0 => efi::Status::SUCCESS,
+        _ => efi::Status::ABORTED, // Or some other status code
+    }
 }
