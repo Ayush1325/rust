@@ -56,6 +56,7 @@ pub mod memchr {
 }
 
 pub unsafe fn init(argc: isize, argv: *const *const u8) {
+    #[cfg(debug_assertions)]
     println!("init");
 }
 
@@ -96,8 +97,11 @@ pub unsafe extern "efiapi" fn efi_main(
     handle: efi::Handle,
     st: *mut efi::SystemTable,
 ) -> efi::Status {
-    let mut msg = [0x0048u16, 0x0065u16, 0x006cu16, 0x006cu16, 0x006fu16, 0x000au16, 0x0000u16];
-    ((*(*st).con_out).output_string)((*st).con_out, msg.as_mut_ptr());
+    #[cfg(debug_assertions)]
+    {
+        let mut msg = [0x0048u16, 0x0065u16, 0x006cu16, 0x006cu16, 0x006fu16, 0x000au16, 0x0000u16];
+        ((*(*st).con_out).output_string)((*st).con_out, msg.as_mut_ptr());
+    }
 
     unsafe { uefi::env::init_globals(handle, st).unwrap() };
 
