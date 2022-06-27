@@ -46,19 +46,7 @@ impl Stdout {
 impl io::Write for Stdout {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let con_out = unsafe { Stdout::get_con_out() }?;
-        let output_string_ptr = unsafe { (*con_out).output_string };
-
-        let mut output = [0u16; 100];
-        let count = utf8_to_utf16(buf, &mut output)?;
-        output[count] = 0;
-
-        let r = (output_string_ptr)(con_out, output.as_mut_ptr());
-
-        if r.is_error() {
-            Err(io::Error::new(io::ErrorKind::Other, r.as_usize().to_string()))
-        } else {
-            Ok(count)
-        }
+        simple_text_output_write(con_out, buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -70,11 +58,32 @@ impl Stderr {
     pub const fn new() -> Stderr {
         Stderr(())
     }
+
+    // Returns error if `SystemTable->StdErr` is null.
+    unsafe fn get_std_err() -> io::Result<*mut simple_text_output::Protocol> {
+        let st = unsafe {
+            match uefi::env::get_system_table() {
+                Ok(x) => x,
+                Err(_) => {
+                    return Err(io::Error::new(io::ErrorKind::NotFound, "Global System Table"))
+                }
+            }
+        };
+
+        let std_err = unsafe { (*st).std_err };
+
+        if std_err.is_null() {
+            Err(io::Error::new(io::ErrorKind::NotFound, "ConOut"))
+        } else {
+            Ok(std_err)
+        }
+    }
 }
 
 impl io::Write for Stderr {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        Ok(buf.len())
+        let std_err = unsafe { Stderr::get_std_err() }?;
+        simple_text_output_write(std_err, buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -175,5 +184,24 @@ fn _utf16_to_utf8_char(ch: u16, buf: &mut [u8]) -> usize {
             buf[2] = c | 0b1000_0000;
             3
         }
+    }
+}
+
+fn simple_text_output_write(
+    protocol: *mut simple_text_output::Protocol,
+    buf: &[u8],
+) -> io::Result<usize> {
+    let output_string_ptr = unsafe { (*protocol).output_string };
+
+    let mut output = [0u16; 100];
+    let count = utf8_to_utf16(buf, &mut output)?;
+    output[count] = 0;
+
+    let r = (output_string_ptr)(protocol, output.as_mut_ptr());
+
+    if r.is_error() {
+        Err(io::Error::new(io::ErrorKind::Other, r.as_usize().to_string()))
+    } else {
+        Ok(count)
     }
 }
