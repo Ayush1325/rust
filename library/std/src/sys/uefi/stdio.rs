@@ -1,19 +1,110 @@
 use crate::{io, os::uefi};
-use r_efi::protocols::simple_text_output;
+use r_efi::efi;
+use r_efi::protocols::{simple_text_input, simple_text_output};
+use r_efi::signatures::system::boot_services::WaitForEventSignature;
 
 pub struct Stdin(());
 pub struct Stdout(());
 pub struct Stderr(());
 
+const MAX_BUFFER_SIZE: usize = 8192;
+
+pub const STDIN_BUF_SIZE: usize = MAX_BUFFER_SIZE / 2 * 3;
+
 impl Stdin {
     pub const fn new() -> Stdin {
         Stdin(())
     }
+
+    // Returns error if `SystemTable->ConIn` is null.
+    unsafe fn get_con_in() -> io::Result<*mut simple_text_input::Protocol> {
+        let st = unsafe {
+            match uefi::env::get_system_table() {
+                Ok(x) => x,
+                Err(_) => {
+                    return Err(io::Error::new(io::ErrorKind::NotFound, "Global System Table"))
+                }
+            }
+        };
+
+        let con_in = unsafe { (*st).con_in };
+
+        if con_in.is_null() {
+            Err(io::Error::new(io::ErrorKind::NotFound, "ConIn"))
+        } else {
+            Ok(con_in)
+        }
+    }
+
+    unsafe fn get_wait_for_event() -> io::Result<WaitForEventSignature> {
+        let st = unsafe {
+            match uefi::env::get_system_table() {
+                Ok(x) => x,
+                Err(_) => {
+                    return Err(io::Error::new(io::ErrorKind::NotFound, "Global System Table"))
+                }
+            }
+        };
+
+        let boot_services = unsafe { (*st).boot_services };
+
+        if boot_services.is_null() {
+            return Err(io::Error::new(io::ErrorKind::NotFound, "Boot Services"));
+        }
+
+        Ok(unsafe { (*boot_services).wait_for_event })
+    }
+
+    unsafe fn fire_wait_event(
+        con_in: *mut simple_text_input::Protocol,
+        wait_for_event: WaitForEventSignature,
+    ) -> io::Result<()> {
+        let r = unsafe {
+            let mut x: usize = 0;
+            (wait_for_event)(1, &mut (*con_in).wait_for_key, &mut x)
+        };
+
+        if r.is_error() {
+            Err(io::Error::new(io::ErrorKind::Other, "Could not wait for event"))
+        } else {
+            Ok(())
+        }
+    }
+
+    unsafe fn read_key_stroke(con_in: *mut simple_text_input::Protocol) -> io::Result<u16> {
+        let mut input_key = simple_text_input::InputKey::default();
+        let r = unsafe { ((*con_in).read_key_stroke)(con_in, &mut input_key) };
+
+        println!("Scan Code: {}\r", input_key.scan_code);
+
+        if r.is_error() || input_key.scan_code != 0 {
+            Err(io::Error::new(io::ErrorKind::InvalidInput, "Error in Reading Keystroke"))
+        } else {
+            Ok(input_key.unicode_char)
+        }
+    }
 }
 
 impl io::Read for Stdin {
-    fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
-        Ok(0)
+    // FIXME: Can take input but cannot use `read_line` or most other reading functions yet.
+    // Pressing <enter> leads to b'\r' instead of b'\n'.
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let con_in = unsafe { Stdin::get_con_in() }?;
+        let wait_for_event = unsafe { Stdin::get_wait_for_event() }?;
+
+        let buf_len = buf.len();
+        let mut buf_count = 0;
+
+        // Max 3 bytes can be required to store a ucs2 character as utf8
+        while buf_len - buf_count >= 3 {
+            unsafe { Stdin::fire_wait_event(con_in, wait_for_event) }?;
+            let ch = unsafe { Stdin::read_key_stroke(con_in) }?;
+
+            let bytes_read = utf16_to_utf8_char(ch, &mut buf[buf_count..]);
+            buf_count += bytes_read;
+        }
+
+        Ok(buf_count)
     }
 }
 
@@ -73,7 +164,7 @@ impl Stderr {
         let std_err = unsafe { (*st).std_err };
 
         if std_err.is_null() {
-            Err(io::Error::new(io::ErrorKind::NotFound, "ConOut"))
+            Err(io::Error::new(io::ErrorKind::NotFound, "StdErr"))
         } else {
             Ok(std_err)
         }
@@ -91,14 +182,12 @@ impl io::Write for Stderr {
     }
 }
 
-pub const STDIN_BUF_SIZE: usize = 0;
-
-pub fn is_ebadf(_err: &io::Error) -> bool {
-    true
+pub fn is_ebadf(err: &io::Error) -> bool {
+    err.raw_os_error() == Some(efi::Status::DEVICE_ERROR.as_usize() as i32)
 }
 
-pub fn panic_output() -> Option<Vec<u8>> {
-    None
+pub fn panic_output() -> Option<impl io::Write> {
+    Some(Stderr::new())
 }
 
 fn utf8_to_utf16(utf8_buf: &[u8], utf16_buf: &mut [u16]) -> io::Result<usize> {
@@ -159,7 +248,7 @@ fn utf8_to_utf16(utf8_buf: &[u8], utf16_buf: &mut [u16]) -> io::Result<usize> {
     Ok(utf16_buf_count)
 }
 
-fn _utf16_to_utf8_char(ch: u16, buf: &mut [u8]) -> usize {
+fn utf16_to_utf8_char(ch: u16, buf: &mut [u8]) -> usize {
     match ch {
         0b0000_0000_0000_0000..0b0000_0000_0111_1111 => {
             // 1-byte
@@ -193,7 +282,7 @@ fn simple_text_output_write(
 ) -> io::Result<usize> {
     let output_string_ptr = unsafe { (*protocol).output_string };
 
-    let mut output = [0u16; 100];
+    let mut output = [0u16; MAX_BUFFER_SIZE / 2];
     let count = utf8_to_utf16(buf, &mut output)?;
     output[count] = 0;
 
