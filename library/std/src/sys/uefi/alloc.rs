@@ -121,9 +121,5 @@ unsafe fn unalign_ptr(ptr: *mut u8, align: usize) -> *mut u8 {
 unsafe fn get_boot_services(st: *mut efi::SystemTable) -> Result<*mut efi::BootServices, ()> {
     let boot_services = unsafe { (*st).boot_services };
 
-    if boot_services.is_null() {
-        Err(())
-    } else {
-        Ok(boot_services)
-    }
+    if boot_services.is_null() { Err(()) } else { Ok(boot_services) }
 }

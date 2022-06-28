@@ -22,7 +22,7 @@ impl Stdin {
             match uefi::env::get_system_table() {
                 Ok(x) => x,
                 Err(_) => {
-                    return Err(io::Error::new(io::ErrorKind::NotFound, "Global System Table"))
+                    return Err(io::Error::new(io::ErrorKind::NotFound, "Global System Table"));
                 }
             }
         };
@@ -41,7 +41,7 @@ impl Stdin {
             match uefi::env::get_system_table() {
                 Ok(x) => x,
                 Err(_) => {
-                    return Err(io::Error::new(io::ErrorKind::NotFound, "Global System Table"))
+                    return Err(io::Error::new(io::ErrorKind::NotFound, "Global System Table"));
                 }
             }
         };
@@ -119,7 +119,7 @@ impl Stdout {
             match uefi::env::get_system_table() {
                 Ok(x) => x,
                 Err(_) => {
-                    return Err(io::Error::new(io::ErrorKind::NotFound, "Global System Table"))
+                    return Err(io::Error::new(io::ErrorKind::NotFound, "Global System Table"));
                 }
             }
         };
@@ -156,7 +156,7 @@ impl Stderr {
             match uefi::env::get_system_table() {
                 Ok(x) => x,
                 Err(_) => {
-                    return Err(io::Error::new(io::ErrorKind::NotFound, "Global System Table"))
+                    return Err(io::Error::new(io::ErrorKind::NotFound, "Global System Table"));
                 }
             }
         };
