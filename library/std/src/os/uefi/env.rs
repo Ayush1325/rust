@@ -67,10 +67,6 @@ impl<T> GlobalData<T> {
     /// returns error if the internal pointer is NULL.
     fn load(&self) -> Result<*mut T, ()> {
         let p = self.ptr.load(Ordering::Relaxed);
-        if p.is_null() {
-            Err(())
-        } else {
-            Ok(p)
-        }
+        if p.is_null() { Err(()) } else { Ok(p) }
     }
 }

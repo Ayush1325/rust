@@ -26,6 +26,7 @@ pub mod fs;
 pub mod io;
 #[path = "../unsupported/locks/mod.rs"]
 pub mod locks;
+#[path = "../unsupported/net.rs"]
 pub mod net;
 pub mod os;
 #[path = "../windows/os_str.rs"]
@@ -55,7 +56,7 @@ pub mod memchr {
     pub use core::slice::memchr::{memchr, memrchr};
 }
 
-pub unsafe fn init(argc: isize, argv: *const *const u8) {
+pub unsafe fn init(_argc: isize, _argv: *const *const u8) {
     #[cfg(debug_assertions)]
     println!("init");
 }
@@ -105,7 +106,7 @@ pub unsafe extern "efiapi" fn efi_main(
 
     unsafe { uefi::env::init_globals(handle, st).unwrap() };
 
-    match main(0, crate::ptr::null()) {
+    match unsafe { main(0, crate::ptr::null()) } {
         0 => efi::Status::SUCCESS,
         _ => efi::Status::ABORTED, // Or some other status code
     }
