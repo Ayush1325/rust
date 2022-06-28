@@ -56,10 +56,7 @@ pub mod memchr {
     pub use core::slice::memchr::{memchr, memrchr};
 }
 
-pub unsafe fn init(_argc: isize, _argv: *const *const u8) {
-    #[cfg(debug_assertions)]
-    println!("init");
-}
+pub unsafe fn init(_argc: isize, _argv: *const *const u8) {}
 
 // SAFETY: must be called only once during runtime cleanup.
 // NOTE: this is not guaranteed to run, for example when the program aborts.
@@ -98,10 +95,11 @@ pub unsafe extern "efiapi" fn efi_main(
     handle: efi::Handle,
     st: *mut efi::SystemTable,
 ) -> efi::Status {
-    #[cfg(debug_assertions)]
-    {
-        let mut msg = [0x0048u16, 0x0065u16, 0x006cu16, 0x006cu16, 0x006fu16, 0x000au16, 0x0000u16];
-        ((*(*st).con_out).output_string)((*st).con_out, msg.as_mut_ptr());
+    unsafe {
+        let mut msg = [
+            0x0048u16, 0x0065u16, 0x006cu16, 0x006cu16, 0x006fu16, 0x000du16, 0x000au16, 0x0000u16,
+        ];
+        ((*(*st).std_err).output_string)((*st).std_err, msg.as_mut_ptr());
     }
 
     unsafe { uefi::env::init_globals(handle, st).unwrap() };
