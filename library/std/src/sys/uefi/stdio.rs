@@ -196,10 +196,20 @@ fn utf8_to_utf16(utf8_buf: &[u8], utf16_buf: &mut [u16]) -> io::Result<usize> {
     let mut utf8_buf_count = 0;
     let mut utf16_buf_count = 0;
 
-    while utf8_buf_count < utf8_buf_len {
+    // Since it is possible for the bytes written to be <= the utf8_buf, we just stop writing if
+    // the utf16_buf fills up
+    // Also leave space for null termination in utf16_buf
+    while utf8_buf_count < utf8_buf_len && utf16_buf_count + 1 < utf16_buf_len {
         match utf8_buf[utf8_buf_count] {
             0b0000_0000..0b0111_1111 => {
                 // 1-byte
+
+                // Convert LF to CRLF
+                if utf8_buf[utf8_buf_count] == b'\n' {
+                    utf16_buf[utf16_buf_count] = u16::from(b'\r');
+                    utf16_buf_count += 1;
+                }
+
                 utf16_buf[utf16_buf_count] = u16::from(utf8_buf[utf8_buf_count]);
 
                 utf8_buf_count += 1;
@@ -229,7 +239,7 @@ fn utf8_to_utf16(utf8_buf: &[u8], utf16_buf: &mut [u16]) -> io::Result<usize> {
             0b1111_0000..0b1111_0111 => {
                 // 4-byte
                 // We just print a restricted Character
-                utf16_buf[utf16_buf_count] = 0xfffd;
+                utf16_buf[utf16_buf_count] = 0xfffdu16;
                 utf8_buf_count += 4;
             }
             _ => {
@@ -239,13 +249,11 @@ fn utf8_to_utf16(utf8_buf: &[u8], utf16_buf: &mut [u16]) -> io::Result<usize> {
         }
 
         utf16_buf_count += 1;
-
-        if utf16_buf_count >= utf16_buf_len {
-            // The utf16 buffer is too small
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "Buffer too small"));
-        }
     }
-    Ok(utf16_buf_count)
+
+    utf16_buf[utf16_buf_count] = 0;
+
+    Ok(utf8_buf_count)
 }
 
 fn utf16_to_utf8_char(ch: u16, buf: &mut [u8]) -> usize {
@@ -284,7 +292,6 @@ fn simple_text_output_write(
 
     let mut output = [0u16; MAX_BUFFER_SIZE / 2];
     let count = utf8_to_utf16(buf, &mut output)?;
-    output[count] = 0;
 
     let r = (output_string_ptr)(protocol, output.as_mut_ptr());
 
