@@ -29,7 +29,6 @@ pub mod locks;
 #[path = "../unsupported/net.rs"]
 pub mod net;
 pub mod os;
-#[path = "../windows/os_str.rs"]
 pub mod os_str;
 #[path = "../unix/path.rs"]
 pub mod path;
