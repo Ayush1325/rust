@@ -16,45 +16,6 @@ impl Stdin {
         Stdin(())
     }
 
-    // Returns error if `SystemTable->ConIn` is null.
-    unsafe fn get_con_in() -> io::Result<*mut simple_text_input::Protocol> {
-        let st = unsafe {
-            match uefi::env::get_system_table() {
-                Ok(x) => x,
-                Err(_) => {
-                    return Err(io::Error::new(io::ErrorKind::NotFound, "Global System Table"));
-                }
-            }
-        };
-
-        let con_in = unsafe { (*st).con_in };
-
-        if con_in.is_null() {
-            Err(io::Error::new(io::ErrorKind::NotFound, "ConIn"))
-        } else {
-            Ok(con_in)
-        }
-    }
-
-    unsafe fn get_wait_for_event() -> io::Result<WaitForEventSignature> {
-        let st = unsafe {
-            match uefi::env::get_system_table() {
-                Ok(x) => x,
-                Err(_) => {
-                    return Err(io::Error::new(io::ErrorKind::NotFound, "Global System Table"));
-                }
-            }
-        };
-
-        let boot_services = unsafe { (*st).boot_services };
-
-        if boot_services.is_null() {
-            return Err(io::Error::new(io::ErrorKind::NotFound, "Boot Services"));
-        }
-
-        Ok(unsafe { (*boot_services).wait_for_event })
-    }
-
     unsafe fn fire_wait_event(
         con_in: *mut simple_text_input::Protocol,
         wait_for_event: WaitForEventSignature,
@@ -75,36 +36,63 @@ impl Stdin {
         let mut input_key = simple_text_input::InputKey::default();
         let r = unsafe { ((*con_in).read_key_stroke)(con_in, &mut input_key) };
 
-        println!("Scan Code: {}\r", input_key.scan_code);
-
         if r.is_error() || input_key.scan_code != 0 {
             Err(io::Error::new(io::ErrorKind::InvalidInput, "Error in Reading Keystroke"))
         } else {
             Ok(input_key.unicode_char)
         }
     }
+
+    unsafe fn reset_weak(con_in: *mut simple_text_input::Protocol) -> io::Result<()> {
+        let r = unsafe { ((*con_in).reset)(con_in, efi::Boolean::TRUE) };
+
+        if r.is_error() {
+            Err(io::Error::new(io::ErrorKind::InvalidInput, "Device Error"))
+        } else {
+            Ok(())
+        }
+    }
+
+    unsafe fn write_character(
+        con_out: *mut simple_text_output::Protocol,
+        character: u16,
+    ) -> io::Result<()> {
+        let mut buf: [u16; 2] = [character, 0];
+        let r = unsafe { ((*con_out).output_string)(con_out, buf.as_mut_ptr()) };
+        if r.is_error() {
+            Err(io::Error::new(io::ErrorKind::InvalidInput, "Device Error"))
+        } else if character == u16::from(b'\r') {
+            // Handle enter
+            unsafe { Self::write_character(con_out, u16::from(b'\n')) }
+        } else {
+            Ok(())
+        }
+    }
 }
 
 impl io::Read for Stdin {
-    // FIXME: Can take input but cannot use `read_line` or most other reading functions yet.
-    // Pressing <enter> leads to b'\r' instead of b'\n'.
+    // Reads 1 UCS-2 character at a time and returns.
+    // FIXME: Implement buffered reading. Currently backspace and other characters are read as
+    // normal characters. Thus it might look like line-editing but it actually isn't
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let con_in = unsafe { Stdin::get_con_in() }?;
-        let wait_for_event = unsafe { Stdin::get_wait_for_event() }?;
+        let con_in = unsafe { get_con_in() }?;
+        let con_out = unsafe { get_con_out() }?;
+        let wait_for_event = unsafe { get_wait_for_event() }?;
 
-        let buf_len = buf.len();
-        let mut buf_count = 0;
-
-        // Max 3 bytes can be required to store a ucs2 character as utf8
-        while buf_len - buf_count >= 3 {
-            unsafe { Stdin::fire_wait_event(con_in, wait_for_event) }?;
-            let ch = unsafe { Stdin::read_key_stroke(con_in) }?;
-
-            let bytes_read = utf16_to_utf8_char(ch, &mut buf[buf_count..]);
-            buf_count += bytes_read;
+        if buf.len() < 3 {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "Buffer too small"));
         }
 
-        Ok(buf_count)
+        let bytes_read = {
+            unsafe { Stdin::reset_weak(con_in) }?;
+            unsafe { Stdin::fire_wait_event(con_in, wait_for_event) }?;
+            let ch = unsafe { Stdin::read_key_stroke(con_in) }?;
+            unsafe { Stdin::write_character(con_out, ch) }?;
+
+            utf16_to_utf8_char(ch, buf)
+        };
+
+        Ok(bytes_read)
     }
 }
 
@@ -112,31 +100,11 @@ impl Stdout {
     pub const fn new() -> Stdout {
         Stdout(())
     }
-
-    // Returns error if `SystemTable->ConOut` is null.
-    unsafe fn get_con_out() -> io::Result<*mut simple_text_output::Protocol> {
-        let st = unsafe {
-            match uefi::env::get_system_table() {
-                Ok(x) => x,
-                Err(_) => {
-                    return Err(io::Error::new(io::ErrorKind::NotFound, "Global System Table"));
-                }
-            }
-        };
-
-        let con_out = unsafe { (*st).con_out };
-
-        if con_out.is_null() {
-            Err(io::Error::new(io::ErrorKind::NotFound, "ConOut"))
-        } else {
-            Ok(con_out)
-        }
-    }
 }
 
 impl io::Write for Stdout {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let con_out = unsafe { Stdout::get_con_out() }?;
+        let con_out = unsafe { get_con_out() }?;
         simple_text_output_write(con_out, buf)
     }
 
@@ -149,31 +117,11 @@ impl Stderr {
     pub const fn new() -> Stderr {
         Stderr(())
     }
-
-    // Returns error if `SystemTable->StdErr` is null.
-    unsafe fn get_std_err() -> io::Result<*mut simple_text_output::Protocol> {
-        let st = unsafe {
-            match uefi::env::get_system_table() {
-                Ok(x) => x,
-                Err(_) => {
-                    return Err(io::Error::new(io::ErrorKind::NotFound, "Global System Table"));
-                }
-            }
-        };
-
-        let std_err = unsafe { (*st).std_err };
-
-        if std_err.is_null() {
-            Err(io::Error::new(io::ErrorKind::NotFound, "StdErr"))
-        } else {
-            Ok(std_err)
-        }
-    }
 }
 
 impl io::Write for Stderr {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let std_err = unsafe { Stderr::get_std_err() }?;
+        let std_err = unsafe { get_std_err() }?;
         simple_text_output_write(std_err, buf)
     }
 
@@ -260,7 +208,9 @@ fn utf16_to_utf8_char(ch: u16, buf: &mut [u8]) -> usize {
     match ch {
         0b0000_0000_0000_0000..0b0000_0000_0111_1111 => {
             // 1-byte
-            buf[0] = ch as u8;
+
+            // Convert CR to LF
+            buf[0] = if ch == u16::from(b'\r') { b'\n' } else { ch as u8 };
             1
         }
         0b0000_0000_0111_1111..0b0000_0111_1111_1111 => {
@@ -299,5 +249,84 @@ fn simple_text_output_write(
         Err(io::Error::new(io::ErrorKind::Other, r.as_usize().to_string()))
     } else {
         Ok(count)
+    }
+}
+
+// Returns error if `SystemTable->ConIn` is null.
+unsafe fn get_con_in() -> io::Result<*mut simple_text_input::Protocol> {
+    let st = unsafe {
+        match uefi::env::get_system_table() {
+            Ok(x) => x,
+            Err(_) => {
+                return Err(io::Error::new(io::ErrorKind::NotFound, "Global System Table"));
+            }
+        }
+    };
+
+    let con_in = unsafe { (*st).con_in };
+
+    if con_in.is_null() {
+        Err(io::Error::new(io::ErrorKind::NotFound, "ConIn"))
+    } else {
+        Ok(con_in)
+    }
+}
+
+unsafe fn get_wait_for_event() -> io::Result<WaitForEventSignature> {
+    let st = unsafe {
+        match uefi::env::get_system_table() {
+            Ok(x) => x,
+            Err(_) => {
+                return Err(io::Error::new(io::ErrorKind::NotFound, "Global System Table"));
+            }
+        }
+    };
+
+    let boot_services = unsafe { (*st).boot_services };
+
+    if boot_services.is_null() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, "Boot Services"));
+    }
+
+    Ok(unsafe { (*boot_services).wait_for_event })
+}
+
+// Returns error if `SystemTable->ConOut` is null.
+unsafe fn get_con_out() -> io::Result<*mut simple_text_output::Protocol> {
+    let st = unsafe {
+        match uefi::env::get_system_table() {
+            Ok(x) => x,
+            Err(_) => {
+                return Err(io::Error::new(io::ErrorKind::NotFound, "Global System Table"));
+            }
+        }
+    };
+
+    let con_out = unsafe { (*st).con_out };
+
+    if con_out.is_null() {
+        Err(io::Error::new(io::ErrorKind::NotFound, "ConOut"))
+    } else {
+        Ok(con_out)
+    }
+}
+
+// Returns error if `SystemTable->StdErr` is null.
+unsafe fn get_std_err() -> io::Result<*mut simple_text_output::Protocol> {
+    let st = unsafe {
+        match uefi::env::get_system_table() {
+            Ok(x) => x,
+            Err(_) => {
+                return Err(io::Error::new(io::ErrorKind::NotFound, "Global System Table"));
+            }
+        }
+    };
+
+    let std_err = unsafe { (*st).std_err };
+
+    if std_err.is_null() {
+        Err(io::Error::new(io::ErrorKind::NotFound, "StdErr"))
+    } else {
+        Ok(std_err)
     }
 }
