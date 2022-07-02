@@ -11,10 +11,13 @@ unsafe impl GlobalAlloc for System {
         let align = layout.align();
         let size = layout.size();
 
+        // Return NULL pointer if `layout.size == 0`
         if size == 0 {
             return core::ptr::null_mut();
         }
 
+        // Return NULL pointer if boot_services pointer cannot be obtained. The only time this
+        // should happen is if SystemTable has not been initialized
         let boot_services = match uefi::env::get_boot_services() {
             Some(x) => x,
             None => return core::ptr::null_mut(),
@@ -22,13 +25,13 @@ unsafe impl GlobalAlloc for System {
 
         let allocate_pool_ptr = unsafe { (*boot_services.as_ptr()).allocate_pool };
 
-        let mut ptr: *mut core::ffi::c_void = core::ptr::null_mut();
+        let mut ptr: *mut crate::ffi::c_void = crate::ptr::null_mut();
         let aligned_size = align_size(size, align);
 
         let r = (allocate_pool_ptr)(MEMORY_TYPE, aligned_size, &mut ptr);
 
         if r.is_error() || ptr.is_null() {
-            return core::ptr::null_mut();
+            return crate::ptr::null_mut();
         }
 
         unsafe { align_ptr(ptr.cast(), align) }

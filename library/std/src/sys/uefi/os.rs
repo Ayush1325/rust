@@ -6,10 +6,9 @@ use crate::io;
 use crate::marker::PhantomData;
 use crate::os::uefi;
 use crate::path::{self, PathBuf};
-use r_efi::efi;
 
 pub fn errno() -> i32 {
-    efi::Status::ABORTED.as_usize() as i32
+    uefi::raw::Status::ABORTED.as_usize() as i32
 }
 
 pub fn error_string(_errno: i32) -> String {
@@ -105,7 +104,7 @@ pub fn exit(code: i32) -> ! {
         let _ = unsafe {
             ((*boot_services.as_ptr()).exit)(
                 handle.as_ptr(),
-                efi::Status::from_usize(code as usize),
+                uefi::raw::Status::from_usize(code as usize),
                 0,
                 [0].as_mut_ptr(),
             )
