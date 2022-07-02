@@ -99,12 +99,12 @@ pub fn home_dir() -> Option<PathBuf> {
 }
 
 pub fn exit(code: i32) -> ! {
-    if let (Ok(st), Ok(handle)) =
-        (unsafe { uefi::env::get_system_table() }, unsafe { uefi::env::get_system_handle() })
+    if let (Some(boot_services), Some(handle)) =
+        (uefi::env::get_boot_services(), uefi::env::get_system_handle())
     {
         let _ = unsafe {
-            ((*(*st).boot_services).exit)(
-                handle,
+            ((*boot_services.as_ptr()).exit)(
+                handle.as_ptr(),
                 efi::Status::from_usize(code as usize),
                 0,
                 [0].as_mut_ptr(),
