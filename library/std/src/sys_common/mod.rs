@@ -35,6 +35,7 @@ pub mod thread_info;
 pub mod thread_local_dtor;
 pub mod thread_local_key;
 pub mod thread_parker;
+pub mod ucs2;
 pub mod wtf8;
 
 cfg_if::cfg_if! {

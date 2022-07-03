@@ -1,3 +1,4 @@
+use crate::sys_common::ucs2;
 use crate::{io, os::uefi, ptr::NonNull};
 use r_efi::efi;
 use r_efi::protocols::{simple_text_input, simple_text_output};
@@ -59,16 +60,16 @@ impl Stdin {
     // FIXME Improve Errors
     fn write_character(
         con_out: NonNull<simple_text_output::Protocol>,
-        character: u16,
+        character: ucs2::Ucs2Char,
     ) -> io::Result<()> {
-        let mut buf: [u16; 2] = [character, 0];
+        let mut buf: [u16; 2] = [character.into(), 0];
         let r = unsafe { ((*con_out.as_ptr()).output_string)(con_out.as_ptr(), buf.as_mut_ptr()) };
 
         if r.is_error() {
             Err(io::Error::new(io::ErrorKind::InvalidInput, "Device Error"))
-        } else if character == u16::from(b'\r') {
-            // Handle enter
-            Self::write_character(con_out, u16::from(b'\n'))
+        } else if character == ucs2::Ucs2Char::CR {
+            // Handle enter key
+            Self::write_character(con_out, ucs2::Ucs2Char::LF)
         } else {
             Ok(())
         }
@@ -96,9 +97,10 @@ impl io::Read for Stdin {
             Stdin::read_key_stroke(con_in)?
         };
 
+        let ch = ucs2::Ucs2Char::from_u16(ch);
         Stdin::write_character(con_out, ch)?;
 
-        let ch = uefi::ffi::ucs2_to_utf8_char(ch);
+        let ch = char::from(ch);
         let bytes_read = ch.len_utf8();
 
         // Replace CR with LF
@@ -159,15 +161,15 @@ pub fn panic_output() -> Option<impl io::Write> {
 }
 
 fn utf8_to_ucs2(buf: &[u8], output: &mut [u16]) -> io::Result<usize> {
-    let iter = uefi::ffi::EncodeUcs2::from_bytes(buf)
+    let iter = ucs2::EncodeUcs2::from_bytes(buf)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid Output buffer"))?;
     let mut count = 0;
     let mut bytes_read = 0;
 
     for ch in iter {
         // Convert LF to CRLF
-        if ch.unicode_char == u16::from(b'\n') {
-            output[count] = u16::from(b'\r');
+        if ch == ucs2::Ucs2Char::LF {
+            output[count] = u16::from(ucs2::Ucs2Char::CR);
             count += 1;
 
             if count + 1 >= output.len() {
@@ -175,8 +177,8 @@ fn utf8_to_ucs2(buf: &[u8], output: &mut [u16]) -> io::Result<usize> {
             }
         }
 
-        output[count] = ch.unicode_char;
-        bytes_read += ch.utf8_len;
+        bytes_read += ch.len_utf8();
+        output[count] = u16::from(ch);
         count += 1;
 
         if count + 1 >= output.len() {
