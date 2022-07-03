@@ -1,7 +1,7 @@
 use crate::ffi::{OsStr, OsString};
 use crate::iter::FusedIterator;
 use crate::sealed::Sealed;
-use crate::str::Chars;
+use crate::str;
 use crate::sys::os_str::Buf;
 use crate::sys_common::{AsInner, FromInner};
 
@@ -97,24 +97,44 @@ pub(crate) fn utf8_to_ucs2_char(ch: char) -> Option<u16> {
     }
 }
 
+pub struct Ucs2Char {
+    pub unicode_char: u16,
+    pub utf8_len: usize,
+}
+
+impl Ucs2Char {
+    pub fn new(unicode_char: u16, utf8_len: usize) -> Self {
+        Self { unicode_char, utf8_len }
+    }
+}
+
 pub struct EncodeUcs2<'a> {
-    utf8_buf: Chars<'a>,
+    utf8_buf: str::Chars<'a>,
 }
 
 impl<'a> EncodeUcs2<'a> {
     fn from_str(s: &'a str) -> Self {
         Self { utf8_buf: s.chars() }
     }
+
+    // Returns error if slice of bytes is not valid UTF-8
+    pub fn from_bytes(s: &'a [u8]) -> Result<Self, str::Utf8Error> {
+        Ok(Self::from_str(str::from_utf8(s)?))
+    }
+
+    unsafe fn from_bytes_unchecked(s: &'a [u8]) -> Self {
+        Self::from_str(unsafe { str::from_utf8_unchecked(s) })
+    }
 }
 
 impl<'a> Iterator for EncodeUcs2<'a> {
-    type Item = u16;
+    type Item = Ucs2Char;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(ch) = self.utf8_buf.next() {
             match utf8_to_ucs2_char(ch) {
-                Some(x) => Some(x),
-                None => Some(REPLACEMENT_CHARACTER_UCS2),
+                Some(x) => Some(Ucs2Char::new(x, ch.len_utf8())),
+                None => Some(Ucs2Char::new(REPLACEMENT_CHARACTER_UCS2, ch.len_utf8())),
             }
         } else {
             None
