@@ -1,6 +1,5 @@
 //! Implementation of path from UEFI. Mostly just copying Windows Implementation
 
-use crate::env;
 use crate::ffi::OsStr;
 use crate::io;
 use crate::path::{Path, PathBuf, Prefix};
