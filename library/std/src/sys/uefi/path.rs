@@ -22,6 +22,6 @@ pub fn parse_prefix(_: &OsStr) -> Option<Prefix<'_>> {
     todo!()
 }
 
-pub(crate) fn absolute(path: &Path) -> io::Result<PathBuf> {
+pub(crate) fn absolute(_path: &Path) -> io::Result<PathBuf> {
     todo!()
 }
