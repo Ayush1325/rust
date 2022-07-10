@@ -2,7 +2,7 @@
 
 use crate::ffi::OsString;
 use crate::fmt;
-use crate::hash::{Hash, Hasher};
+use crate::hash::Hash;
 use crate::io::{self, IoSlice, IoSliceMut, ReadBuf, SeekFrom};
 use crate::os::uefi;
 use crate::os::uefi::ffi::OsStrExt;
@@ -174,6 +174,7 @@ impl OpenOptions {
 
     pub fn append(&mut self, _append: bool) {}
 
+    // FIXME: Should be possible to implement
     pub fn truncate(&mut self, _truncate: bool) {}
 
     // Use const one upstream is fixed
@@ -185,7 +186,8 @@ impl OpenOptions {
         }
     }
 
-    pub fn create_new(&mut self, create_new: bool) {}
+    // FIXME: Should be possible to implement
+    pub fn create_new(&mut self, _create_new: bool) {}
 }
 
 impl File {
@@ -244,50 +246,47 @@ supported",
     }
 
     pub fn file_attr(&self) -> io::Result<FileAttr> {
-        todo!()
+        use crate::io::ErrorKind;
+        use uefi::raw::protocols::file;
+        use uefi::raw::Status;
+
+        let protocol = self.ptr;
+        let mut info_guid = file::INFO_ID;
+        let mut buf_size = usize::MAX;
+        let buf: *mut file::Info = crate::ptr::null_mut();
+
+        let r = unsafe {
+            ((*protocol.as_ptr()).get_info)(
+                protocol.as_ptr(),
+                &mut info_guid,
+                &mut buf_size,
+                buf.cast(),
+            )
+        };
+
+        if r.is_error() {
+            let e = match r {
+                Status::NO_MEDIA => io::Error::new(ErrorKind::Other, "Device has no medium"),
+                Status::DEVICE_ERROR => {
+                    io::Error::new(ErrorKind::Other, "Device reported an error")
+                }
+                Status::VOLUME_CORRUPTED => {
+                    io::Error::new(ErrorKind::Other, "File system structures are corrupted")
+                }
+                Status::BUFFER_TOO_SMALL => io::Error::new(
+                    ErrorKind::Other,
+                    "BufferSize is too small to read the current directory entry",
+                ),
+                Status::UNSUPPORTED => unreachable!(),
+                _ => unreachable!(),
+            };
+            Err(e)
+        } else {
+            Ok(FileAttr::from(unsafe { *buf }))
+        }
     }
 
     pub fn fsync(&self) -> io::Result<()> {
-        unimplemented!()
-    }
-
-    pub fn datasync(&self) -> io::Result<()> {
-        unimplemented!()
-    }
-
-    pub fn truncate(&self, _size: u64) -> io::Result<()> {
-        unimplemented!()
-    }
-
-    pub fn read(&self, _buf: &mut [u8]) -> io::Result<usize> {
-        todo!()
-    }
-
-    pub fn read_vectored(&self, _bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
-        todo!()
-    }
-
-    pub fn is_read_vectored(&self) -> bool {
-        todo!()
-    }
-
-    pub fn read_buf(&self, _buf: &mut ReadBuf<'_>) -> io::Result<()> {
-        todo!()
-    }
-
-    pub fn write(&self, _buf: &[u8]) -> io::Result<usize> {
-        todo!()
-    }
-
-    pub fn write_vectored(&self, _bufs: &[IoSlice<'_>]) -> io::Result<usize> {
-        todo!()
-    }
-
-    pub fn is_write_vectored(&self) -> bool {
-        todo!()
-    }
-
-    pub fn flush(&self) -> io::Result<()> {
         use uefi::raw::Status;
 
         let protocol = self.ptr;
@@ -298,25 +297,19 @@ supported",
             let e = match r {
                 Status::WRITE_PROTECTED => io::Error::new(
                     io::ErrorKind::ReadOnlyFilesystem,
-                    "The file or medium is write-protected.",
+                    "File or medium is write-protected",
                 ),
-                Status::ACCESS_DENIED => io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "The file was opened read-only.",
-                ),
-                Status::VOLUME_FULL => {
-                    io::Error::new(io::ErrorKind::StorageFull, "The volume is full.")
+                Status::ACCESS_DENIED => {
+                    io::Error::new(io::ErrorKind::PermissionDenied, "File was opened read-only")
                 }
-                Status::VOLUME_CORRUPTED => io::Error::new(
-                    io::ErrorKind::Other,
-                    "The file system structures are corrupted.",
-                ),
+                Status::VOLUME_FULL => io::Error::new(io::ErrorKind::StorageFull, "Volume is full"),
+                Status::VOLUME_CORRUPTED => {
+                    io::Error::new(io::ErrorKind::Other, "File system structures are corrupted")
+                }
                 Status::DEVICE_ERROR => {
-                    io::Error::new(io::ErrorKind::Other, "The device reported an error.")
+                    io::Error::new(io::ErrorKind::Other, "Device reported an error")
                 }
-                Status::NO_MEDIA => {
-                    io::Error::new(io::ErrorKind::Other, "The device has no medium.")
-                }
+                Status::NO_MEDIA => io::Error::new(io::ErrorKind::Other, "Device has no medium"),
                 _ => unreachable!(),
             };
             Err(e)
@@ -325,8 +318,171 @@ supported",
         }
     }
 
-    pub fn seek(&self, _pos: SeekFrom) -> io::Result<u64> {
-        todo!()
+    pub fn datasync(&self) -> io::Result<()> {
+        self.fsync()
+    }
+
+    pub fn truncate(&self, _size: u64) -> io::Result<()> {
+        unimplemented!()
+    }
+
+    pub fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
+        use crate::io::ErrorKind;
+        use uefi::raw::Status;
+
+        let protocol = self.ptr;
+        let mut buffer_size = buf.len();
+
+        let r = unsafe {
+            ((*protocol.as_ptr()).read)(
+                protocol.as_ptr(),
+                &mut buffer_size,
+                buf.as_mut_ptr().cast(),
+            )
+        };
+
+        if r.is_error() {
+            let e = match r {
+                Status::NO_MEDIA => io::Error::new(ErrorKind::Other, "Device has no medium"),
+                Status::DEVICE_ERROR => io::Error::new(ErrorKind::Other, "EFI_DEVICE_ERROR"),
+                Status::VOLUME_CORRUPTED => {
+                    io::Error::new(ErrorKind::Other, "File system structures are corrupted")
+                }
+                // Only occurs in case of reading directory
+                Status::BUFFER_TOO_SMALL => unreachable!(),
+                _ => unreachable!(),
+            };
+            Err(e)
+        } else {
+            Ok(buffer_size)
+        }
+    }
+
+    pub fn read_vectored(&self, bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
+        crate::io::default_read_vectored(|buf| self.read(buf), bufs)
+    }
+
+    pub fn is_read_vectored(&self) -> bool {
+        false
+    }
+
+    pub fn read_buf(&self, buf: &mut ReadBuf<'_>) -> io::Result<()> {
+        use crate::io::ErrorKind;
+        use uefi::raw::Status;
+
+        let protocol = self.ptr;
+        let mut buffer_size = buf.remaining();
+
+        let r = unsafe {
+            ((*protocol.as_ptr()).read)(
+                protocol.as_ptr(),
+                &mut buffer_size,
+                buf.unfilled_mut().as_mut_ptr().cast(),
+            )
+        };
+
+        if r.is_error() {
+            let e = match r {
+                Status::NO_MEDIA => io::Error::new(ErrorKind::Other, "Device has no medium"),
+                Status::DEVICE_ERROR => io::Error::new(ErrorKind::Other, "EFI_DEVICE_ERROR"),
+                Status::VOLUME_CORRUPTED => {
+                    io::Error::new(ErrorKind::Other, "File system structures are corrupted")
+                }
+                // Only occurs in case of reading directory
+                Status::BUFFER_TOO_SMALL => unreachable!(),
+                _ => unreachable!(),
+            };
+            Err(e)
+        } else {
+            unsafe {
+                buf.assume_init(buffer_size);
+            }
+            buf.add_filled(buffer_size);
+            Ok(())
+        }
+    }
+
+    pub fn write(&self, buf: &[u8]) -> io::Result<usize> {
+        use crate::io::ErrorKind;
+        use uefi::raw::Status;
+
+        let protocol = self.ptr;
+        let mut buffer_size = buf.len();
+
+        let r = unsafe {
+            ((*protocol.as_ptr()).write)(
+                protocol.as_ptr(),
+                &mut buffer_size,
+                // FIXME: Find if write can modify the buffer
+                buf.as_ptr() as *mut crate::ffi::c_void,
+            )
+        };
+
+        if r.is_error() {
+            let e = match r {
+                Status::NO_MEDIA => io::Error::new(ErrorKind::Other, "Device has no medium"),
+                Status::DEVICE_ERROR => io::Error::new(ErrorKind::Other, "EFI_DEVICE_ERROR"),
+                Status::VOLUME_CORRUPTED => {
+                    io::Error::new(ErrorKind::Other, "File system structures are corrupted")
+                }
+                Status::WRITE_PROTECTED => io::Error::new(
+                    ErrorKind::ReadOnlyFilesystem,
+                    "File or medium is write-protected",
+                ),
+                Status::ACCESS_DENIED => {
+                    io::Error::new(ErrorKind::PermissionDenied, "File was opened read only")
+                }
+                // Only occurs in case of reading directory
+                Status::UNSUPPORTED => unreachable!(),
+                _ => unreachable!(),
+            };
+            Err(e)
+        } else {
+            Ok(buffer_size)
+        }
+    }
+
+    pub fn write_vectored(&self, bufs: &[IoSlice<'_>]) -> io::Result<usize> {
+        crate::io::default_write_vectored(|buf| self.write(buf), bufs)
+    }
+
+    pub fn is_write_vectored(&self) -> bool {
+        false
+    }
+
+    pub fn flush(&self) -> io::Result<()> {
+        Ok(())
+    }
+
+    pub fn seek(&self, pos: SeekFrom) -> io::Result<u64> {
+        use uefi::raw::Status;
+
+        const FILE_END: i64 = 0xFFFFFFFFFFFFFFFi64;
+
+        let protocol = self.ptr;
+
+        let position: u64 = match pos {
+            SeekFrom::Start(x) => x,
+            SeekFrom::Current(x) => ((self.get_position()? as i64) + x) as u64,
+            SeekFrom::End(x) => (FILE_END + x) as u64,
+        };
+
+        let r = unsafe { ((*protocol.as_ptr()).set_position)(protocol.as_ptr(), position) };
+
+        if r.is_error() {
+            let e = match r {
+                Status::DEVICE_ERROR => {
+                    io::Error::new(io::ErrorKind::Other, "Device reported an error")
+                }
+
+                // Only occurs for Directory
+                Status::UNSUPPORTED => unreachable!(),
+                _ => unreachable!(),
+            };
+            Err(e)
+        } else {
+            Ok(position)
+        }
     }
 
     pub fn duplicate(&self) -> io::Result<File> {
@@ -335,6 +491,42 @@ supported",
 
     pub fn set_permissions(&self, _perm: FilePermissions) -> io::Result<()> {
         unimplemented!()
+    }
+
+    fn get_position(&self) -> io::Result<u64> {
+        use uefi::raw::Status;
+
+        let protocol = self.ptr;
+        let mut pos: u64 = 0;
+
+        let r = unsafe { ((*protocol.as_ptr()).get_position)(protocol.as_ptr(), &mut pos) };
+
+        if r.is_error() {
+            let e = match r {
+                Status::DEVICE_ERROR => io::Error::new(
+                    io::ErrorKind::Other,
+                    "An attempt was made to get the position from a deleted file.",
+                ),
+
+                // Only occurs for Directory
+                Status::UNSUPPORTED => unreachable!(),
+                _ => unreachable!(),
+            };
+            Err(e)
+        } else {
+            Ok(pos)
+        }
+    }
+}
+
+impl Drop for File {
+    fn drop(&mut self) {
+        let protocol = self.ptr;
+
+        let _ = self.datasync();
+
+        // This always returns EFI_SUCCESS
+        let _ = unsafe { ((*protocol.as_ptr()).close)(protocol.as_ptr()) };
     }
 }
 
@@ -366,7 +558,7 @@ pub fn rename(_old: &Path, _new: &Path) -> io::Result<()> {
     unsupported()
 }
 
-pub fn set_perm(_p: &Path, perm: FilePermissions) -> io::Result<()> {
+pub fn set_perm(_p: &Path, _perm: FilePermissions) -> io::Result<()> {
     todo!()
 }
 
