@@ -19,7 +19,7 @@ pub fn is_verbatim_sep(b: u8) -> bool {
 
 #[inline]
 pub fn parse_prefix(_: &OsStr) -> Option<Prefix<'_>> {
-    todo!()
+    None
 }
 
 pub(crate) fn absolute(_path: &Path) -> io::Result<PathBuf> {

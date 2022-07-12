@@ -88,6 +88,19 @@ impl From<file::Info> for FileAttr {
     }
 }
 
+impl From<&file::Info> for FileAttr {
+    fn from(info: &file::Info) -> Self {
+        FileAttr {
+            size: info.file_size,
+            perm: FilePermissions { attr: info.attribute },
+            file_type: FileType { attr: info.attribute },
+            modification_time: SystemTime::from(info.modification_time),
+            last_accessed_time: SystemTime::from(info.last_access_time),
+            created_time: SystemTime::from(info.create_time),
+        }
+    }
+}
+
 impl FilePermissions {
     pub fn readonly(&self) -> bool {
         self.attr & file::READ_ONLY != 0
@@ -198,7 +211,7 @@ impl File {
     }
 
     pub fn file_attr(&self) -> io::Result<FileAttr> {
-        Ok(FileAttr::from(self.ptr.get_info()?))
+        Ok(self.ptr.get_info()?)
     }
 
     pub fn fsync(&self) -> io::Result<()> {
@@ -319,12 +332,21 @@ pub fn set_perm(_p: &Path, _perm: FilePermissions) -> io::Result<()> {
     todo!()
 }
 
-pub fn rmdir(_p: &Path) -> io::Result<()> {
-    unsupported()
+pub fn rmdir(p: &Path) -> io::Result<()> {
+    let open_mode = file::MODE_READ | file::MODE_WRITE;
+    let attr = file::DIRECTORY;
+    let file = {
+        let rootfs = uefi_fs::FileProtocol::get_rootfs()?;
+        rootfs.open(p, open_mode, attr)
+    }?;
+    file.delete()
 }
 
-pub fn remove_dir_all(_path: &Path) -> io::Result<()> {
-    unsupported()
+// FIXME: Implement similar to how EFI Shell does it.
+// Can be found at: ShellPkg/Library/UefiShellLevel2CommandsLib/Rm.c
+// Leaving this unimplemented for now since it will need a lot of other fs stuff to be implemented
+pub fn remove_dir_all(path: &Path) -> io::Result<()> {
+    todo!()
 }
 
 pub fn try_exists(_path: &Path) -> io::Result<bool> {
@@ -360,6 +382,7 @@ pub fn copy(_from: &Path, _to: &Path) -> io::Result<u64> {
 }
 
 mod uefi_fs {
+    use super::FileAttr;
     use crate::io;
     use crate::os::uefi;
     use crate::os::uefi::ffi::OsStrExt;
@@ -584,7 +607,7 @@ supported",
                         io::ErrorKind::FileTooLarge,
                         "BufferSize is too small to read the current directory entry.",
                     ),
-                    _ => unreachable!(),
+                    _ => io::Error::new(io::ErrorKind::Other, "Unknown Error"),
                 };
                 Err(e)
             } else {
@@ -618,7 +641,10 @@ supported",
                     Status::NO_MEDIA => {
                         io::Error::new(io::ErrorKind::Other, "Device has no medium")
                     }
-                    _ => unreachable!(),
+                    _ => io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Unknown Error: {}", r.as_usize()),
+                    ),
                 };
                 Err(e)
             } else {
@@ -626,37 +652,84 @@ supported",
             }
         }
 
-        pub(crate) fn get_info(&self) -> io::Result<file::Info> {
+        pub(crate) fn get_info(&self) -> io::Result<FileAttr> {
+            use crate::alloc::{Allocator, Global, Layout};
+
+            fn inner(
+                protocol: *mut file::Protocol,
+                buf_size: &mut usize,
+                buf: *mut crate::ffi::c_void,
+            ) -> io::Result<()> {
+                let mut info_guid = file::INFO_ID;
+                let r = unsafe { ((*protocol).get_info)(protocol, &mut info_guid, buf_size, buf) };
+                if r.is_error() {
+                    let e = match r {
+                        Status::NO_MEDIA => {
+                            io::Error::new(io::ErrorKind::Other, "Device has no medium")
+                        }
+                        Status::DEVICE_ERROR => {
+                            io::Error::new(io::ErrorKind::Other, "Device reported an error")
+                        }
+                        Status::VOLUME_CORRUPTED => io::Error::new(
+                            io::ErrorKind::Other,
+                            "File system structures are corrupted",
+                        ),
+                        Status::BUFFER_TOO_SMALL => io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "BufferSize is too small to read the current directory entry",
+                        ),
+                        Status::UNSUPPORTED => unreachable!(),
+                        _ => io::Error::new(io::ErrorKind::Other, "Unknown Error"),
+                    };
+                    Err(e)
+                } else {
+                    Ok(())
+                }
+            }
+
             let protocol = self.inner.as_ptr();
-            let mut info_guid = file::INFO_ID;
-            let mut buf_size = usize::MAX;
-            let buf: *mut file::Info = crate::ptr::null_mut();
+            let mut buf_size = 0usize;
 
-            let r = unsafe {
-                ((*protocol).get_info)(protocol, &mut info_guid, &mut buf_size, buf.cast())
-            };
+            match inner(protocol, &mut buf_size, crate::ptr::null_mut()) {
+                Ok(()) => unreachable!(),
+                Err(e) => match e.kind() {
+                    io::ErrorKind::InvalidData => {}
+                    _ => return Err(e),
+                },
+            }
 
+            let layout = Layout::from_size_align(buf_size, 8usize)
+                .map_err(|_| io::Error::new(io::ErrorKind::Other, "Invalid buffer size"))?;
+            let buf: NonNull<file::Info> = Global
+                .allocate(layout)
+                .map_err(|_| io::Error::new(io::ErrorKind::Other, "Failed to allocate Buffer"))?
+                .cast();
+
+            match inner(protocol, &mut buf_size, buf.as_ptr().cast()) {
+                Ok(()) => {}
+                Err(e) => return Err(e),
+            }
+
+            let res = FileAttr::from(unsafe { buf.as_ref() });
+
+            unsafe {
+                Global.deallocate(buf.cast(), layout);
+            }
+
+            Ok(res)
+        }
+
+        pub(crate) fn delete(self) -> io::Result<()> {
+            let file = crate::mem::ManuallyDrop::new(self);
+            let protocol = file.inner.as_ptr();
+            let r = unsafe { ((*protocol).delete)(protocol) };
             if r.is_error() {
-                let e = match r {
-                    Status::NO_MEDIA => {
-                        io::Error::new(io::ErrorKind::Other, "Device has no medium")
-                    }
-                    Status::DEVICE_ERROR => {
-                        io::Error::new(io::ErrorKind::Other, "Device reported an error")
-                    }
-                    Status::VOLUME_CORRUPTED => {
-                        io::Error::new(io::ErrorKind::Other, "File system structures are corrupted")
-                    }
-                    Status::BUFFER_TOO_SMALL => io::Error::new(
-                        io::ErrorKind::Other,
-                        "BufferSize is too small to read the current directory entry",
-                    ),
-                    Status::UNSUPPORTED => unreachable!(),
-                    _ => unreachable!(),
-                };
-                Err(e)
+                Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "Handle was closed, but the file was not deleted",
+                ))
             } else {
-                Ok(unsafe { *buf })
+                Ok(())
             }
         }
     }
