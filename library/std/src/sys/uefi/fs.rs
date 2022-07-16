@@ -1,9 +1,10 @@
 //! Implemented using File Protocol
 
-use crate::ffi::OsString;
+use crate::ffi::{OsStr, OsString};
 use crate::fmt;
 use crate::hash::Hash;
 use crate::io::{self, IoSlice, IoSliceMut, ReadBuf, SeekFrom};
+use crate::os::uefi::ffi::{OsStrExt, OsStringExt};
 use crate::os::uefi::raw::protocols::file;
 use crate::path::{Path, PathBuf};
 use crate::sys::time::SystemTime;
@@ -14,7 +15,7 @@ pub struct File {
     ptr: uefi_fs::FileProtocol,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct FileAttr {
     size: u64,
     perm: FilePermissions,
@@ -24,9 +25,14 @@ pub struct FileAttr {
     modification_time: SystemTime,
 }
 
-pub struct ReadDir(!);
+pub struct ReadDir {
+    inner: uefi_fs::FileProtocol,
+}
 
-pub struct DirEntry(!);
+pub struct DirEntry {
+    pub(crate) attr: FileAttr,
+    pub(crate) name: OsString,
+}
 
 #[derive(Clone, Debug)]
 pub struct OpenOptions {
@@ -76,19 +82,6 @@ impl FileAttr {
     }
 }
 
-impl From<file::Info> for FileAttr {
-    fn from(info: file::Info) -> Self {
-        FileAttr {
-            size: info.file_size,
-            perm: FilePermissions { attr: info.attribute },
-            file_type: FileType { attr: info.attribute },
-            modification_time: SystemTime::from(info.modification_time),
-            last_accessed_time: SystemTime::from(info.last_access_time),
-            created_time: SystemTime::from(info.create_time),
-        }
-    }
-}
-
 impl From<&file::Info> for FileAttr {
     fn from(info: &file::Info) -> Self {
         FileAttr {
@@ -134,7 +127,7 @@ impl FileType {
 
 impl fmt::Debug for ReadDir {
     fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0
+        todo!()
     }
 }
 
@@ -142,25 +135,34 @@ impl Iterator for ReadDir {
     type Item = io::Result<DirEntry>;
 
     fn next(&mut self) -> Option<io::Result<DirEntry>> {
-        self.0
+        let dir_entry = self.inner.read_dir_entry();
+        if let Some(Ok(ref x)) = dir_entry {
+            if x.file_name() == OsString::from(".") || x.file_name() == OsString::from("..") {
+                self.next()
+            } else {
+                dir_entry
+            }
+        } else {
+            dir_entry
+        }
     }
 }
 
 impl DirEntry {
     pub fn path(&self) -> PathBuf {
-        self.0
+        todo!()
     }
 
     pub fn file_name(&self) -> OsString {
-        self.0
+        self.name.clone()
     }
 
     pub fn metadata(&self) -> io::Result<FileAttr> {
-        self.0
+        Ok(self.attr)
     }
 
     pub fn file_type(&self) -> io::Result<FileType> {
-        self.0
+        Ok(self.attr.file_type())
     }
 }
 
@@ -212,7 +214,7 @@ impl File {
     }
 
     pub fn file_attr(&self) -> io::Result<FileAttr> {
-        Ok(self.ptr.get_info()?)
+        Ok(self.ptr.get_file_attr()?)
     }
 
     pub fn fsync(&self) -> io::Result<()> {
@@ -317,8 +319,14 @@ impl fmt::Debug for File {
     }
 }
 
-pub fn readdir(_p: &Path) -> io::Result<ReadDir> {
-    unsupported()
+pub fn readdir(p: &Path) -> io::Result<ReadDir> {
+    let open_mode = file::MODE_READ;
+    let attr = file::DIRECTORY;
+    let inner = {
+        let rootfs = uefi_fs::FileProtocol::get_rootfs()?;
+        rootfs.open(p, open_mode, attr)
+    }?;
+    Ok(ReadDir { inner })
 }
 
 pub fn unlink(_p: &Path) -> io::Result<()> {
@@ -347,7 +355,13 @@ pub fn rmdir(p: &Path) -> io::Result<()> {
 // Can be found at: ShellPkg/Library/UefiShellLevel2CommandsLib/Rm.c
 // Leaving this unimplemented for now since it will need a lot of other fs stuff to be implemented
 pub fn remove_dir_all(path: &Path) -> io::Result<()> {
-    todo!()
+    let open_mode = file::MODE_READ | file::MODE_WRITE;
+    let attr = file::DIRECTORY;
+    let file = {
+        let rootfs = uefi_fs::FileProtocol::get_rootfs()?;
+        rootfs.open(path, open_mode, attr)
+    }?;
+    cascade_delete(file)
 }
 
 pub fn try_exists(_path: &Path) -> io::Result<bool> {
@@ -382,16 +396,59 @@ pub fn copy(_from: &Path, _to: &Path) -> io::Result<u64> {
     unsupported()
 }
 
+// Liberal Cascade Delete
+// The file should not point to root
+fn cascade_delete(file: uefi_fs::FileProtocol) -> io::Result<()> {
+    println!("Cascade Start");
+
+    // Skip "." and ".."
+    let _ = file.read_dir_entry();
+    let _ = file.read_dir_entry();
+
+    while let Some(dir_entry) = file.read_dir_entry() {
+        if let Ok(dir_entry) = dir_entry {
+            if let Ok(t) = dir_entry.file_type() {
+                println!("Cascade FileType");
+                if t.is_dir() {
+                    let open_mode = file::MODE_READ | file::MODE_WRITE;
+                    let attr = file::DIRECTORY;
+                    let new_file =
+                        match file.open(&PathBuf::from(dir_entry.file_name()), open_mode, attr) {
+                            Ok(x) => x,
+                            Err(_) => continue,
+                        };
+                    cascade_delete(new_file);
+                } else {
+                    let open_mode = file::MODE_READ | file::MODE_WRITE;
+                    let attr = 0;
+                    let new_file =
+                        match file.open(&PathBuf::from(dir_entry.file_name()), open_mode, attr) {
+                            Ok(x) => x,
+                            Err(_) => continue,
+                        };
+                    let _ = new_file.delete();
+                }
+            }
+        }
+    }
+
+    println!("Cascade End");
+    file.delete()
+}
+
 mod uefi_fs {
-    use super::FileAttr;
+    use super::{DirEntry, FileAttr};
+    use crate::ffi::OsString;
     use crate::io;
+    use crate::mem::MaybeUninit;
     use crate::os::uefi;
-    use crate::os::uefi::ffi::OsStrExt;
+    use crate::os::uefi::ffi::{OsStrExt, OsStringExt};
     use crate::os::uefi::raw::{protocols::file, Status};
     use crate::path::Path;
     use crate::ptr::NonNull;
 
     // Wrapper around File Protocol. Automatically closes file/directories on being dropped.
+    #[derive(Clone)]
     pub(crate) struct FileProtocol {
         inner: NonNull<uefi::raw::protocols::file::Protocol>,
     }
@@ -420,17 +477,17 @@ mod uefi_fs {
             >(device_handle, &mut simple_file_guid)
             .ok_or(io::Error::new(io::ErrorKind::Other, "Error getting Simple File System"))?;
 
-            let mut file_protocol: *mut file::Protocol = crate::ptr::null_mut();
+            let mut file_protocol: MaybeUninit<*mut file::Protocol> = MaybeUninit::uninit();
             let r = unsafe {
                 ((*simple_file_system_protocol.as_ptr()).open_volume)(
                     simple_file_system_protocol.as_ptr(),
-                    &mut file_protocol,
+                    file_protocol.as_mut_ptr(),
                 )
             };
             if r.is_error() {
                 Err(io::Error::new(io::ErrorKind::Other, "Error getting rootfs"))
             } else {
-                let p = NonNull::new(file_protocol)
+                let p = NonNull::new(unsafe { file_protocol.assume_init() })
                     .ok_or(io::Error::new(io::ErrorKind::Other, "Error getting rootfs"))?;
                 Ok(Self::new(p))
             }
@@ -444,11 +501,12 @@ mod uefi_fs {
         ) -> io::Result<FileProtocol> {
             let rootfs = self.inner.as_ptr();
 
-            let mut file_opened: *mut uefi::raw::protocols::file::Protocol = crate::ptr::null_mut();
+            let mut file_opened: MaybeUninit<*mut uefi::raw::protocols::file::Protocol> =
+                MaybeUninit::uninit();
             let r = unsafe {
                 ((*rootfs).open)(
                     rootfs,
-                    &mut file_opened,
+                    file_opened.as_mut_ptr(),
                     path.as_os_str().to_ffi_string().as_mut_ptr(),
                     open_mode,
                     attr,
@@ -495,7 +553,7 @@ supported",
                 };
                 Err(e)
             } else {
-                let p = NonNull::new(file_opened)
+                let p = NonNull::new(unsafe { file_opened.assume_init() })
                     .ok_or(io::Error::new(io::ErrorKind::Other, "File is Null"))?;
                 Ok(FileProtocol::new(p))
             }
@@ -589,6 +647,36 @@ supported",
             }
         }
 
+        unsafe fn raw_read(
+            protocol: *mut file::Protocol,
+            buf_size: *mut usize,
+            buf: *mut crate::ffi::c_void,
+        ) -> io::Result<()> {
+            let r = unsafe { ((*protocol).read)(protocol, buf_size, buf) };
+
+            if r.is_error() {
+                let e = match r {
+                    Status::NO_MEDIA => {
+                        io::Error::new(io::ErrorKind::Other, "Device has no medium")
+                    }
+                    Status::DEVICE_ERROR => {
+                        io::Error::new(io::ErrorKind::Other, "EFI_DEVICE_ERROR")
+                    }
+                    Status::VOLUME_CORRUPTED => {
+                        io::Error::new(io::ErrorKind::Other, "File system structures are corrupted")
+                    }
+                    Status::BUFFER_TOO_SMALL => io::Error::new(
+                        io::ErrorKind::FileTooLarge,
+                        "BufferSize is too small to read the current directory entry.",
+                    ),
+                    _ => io::Error::new(io::ErrorKind::Other, "Unknown Error"),
+                };
+                Err(e)
+            } else {
+                Ok(())
+            }
+        }
+
         pub(crate) fn read<T>(&self, buf: &mut [T], buffer_size: &mut usize) -> io::Result<()> {
             let protocol = self.inner.as_ptr();
             let r = unsafe { ((*protocol).read)(protocol, buffer_size, buf.as_mut_ptr().cast()) };
@@ -653,7 +741,65 @@ supported",
             }
         }
 
-        pub(crate) fn get_info(&self) -> io::Result<FileAttr> {
+        pub fn read_dir_entry(&self) -> Option<io::Result<DirEntry>> {
+            use crate::alloc::{Allocator, Global, Layout};
+
+            let protocol = self.inner.as_ptr();
+            let mut buf_size = 0usize;
+
+            match unsafe {
+                Self::raw_read(self.inner.as_ptr(), &mut buf_size, crate::ptr::null_mut())
+            } {
+                Ok(()) => {}
+                Err(e) => match e.kind() {
+                    io::ErrorKind::FileTooLarge => {}
+                    _ => return Some(Err(e)),
+                },
+            }
+
+            if buf_size == 0 {
+                return None;
+            }
+
+            let layout = match Layout::from_size_align(buf_size, 8usize) {
+                Ok(x) => x,
+                Err(_) => {
+                    return Some(Err(io::Error::new(io::ErrorKind::Other, "Invalid buffer size")));
+                }
+            };
+
+            let buf: NonNull<file::Info> = match Global.allocate(layout) {
+                Ok(x) => x.cast(),
+                Err(_) => {
+                    return Some(Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "Failed to allocate Buffer",
+                    )));
+                }
+            };
+
+            match unsafe { Self::raw_read(protocol, &mut buf_size, buf.as_ptr().cast()) } {
+                Ok(()) => {}
+                Err(e) => {
+                    unsafe {
+                        Global.deallocate(buf.cast(), layout);
+                    }
+                    return Some(Err(e));
+                }
+            }
+            let name_len: usize = (buf_size - crate::mem::size_of::<file::Info>()) >> 1;
+            let name =
+                unsafe { OsString::from_ffi((*buf.as_ptr()).file_name.as_mut_ptr(), name_len) };
+            let attr = FileAttr::from(unsafe { buf.as_ref() });
+
+            unsafe {
+                Global.deallocate(buf.cast(), layout);
+            }
+
+            Some(Ok(DirEntry { attr, name }))
+        }
+
+        pub(crate) fn get_file_attr(&self) -> io::Result<FileAttr> {
             use crate::alloc::{Allocator, Global, Layout};
 
             fn inner(
@@ -718,6 +864,73 @@ supported",
             }
 
             Ok(res)
+        }
+
+        // The caller needs to deallocate NonNull<file::Info> if the functions returns Ok()
+        unsafe fn get_info(&self) -> io::Result<(NonNull<file::Info>, crate::alloc::Layout)> {
+            use crate::alloc::{Allocator, Global, Layout};
+
+            fn inner(
+                protocol: *mut file::Protocol,
+                buf_size: &mut usize,
+                buf: *mut crate::ffi::c_void,
+            ) -> io::Result<()> {
+                let mut info_guid = file::INFO_ID;
+                let r = unsafe { ((*protocol).get_info)(protocol, &mut info_guid, buf_size, buf) };
+                if r.is_error() {
+                    let e = match r {
+                        Status::NO_MEDIA => {
+                            io::Error::new(io::ErrorKind::Other, "Device has no medium")
+                        }
+                        Status::DEVICE_ERROR => {
+                            io::Error::new(io::ErrorKind::Other, "Device reported an error")
+                        }
+                        Status::VOLUME_CORRUPTED => io::Error::new(
+                            io::ErrorKind::Other,
+                            "File system structures are corrupted",
+                        ),
+                        Status::BUFFER_TOO_SMALL => io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "BufferSize is too small to read the current directory entry",
+                        ),
+                        Status::UNSUPPORTED => unreachable!(),
+                        _ => io::Error::new(io::ErrorKind::Other, "Unknown Error"),
+                    };
+                    Err(e)
+                } else {
+                    Ok(())
+                }
+            }
+
+            let protocol = self.inner.as_ptr();
+            let mut buf_size = 0usize;
+
+            match inner(protocol, &mut buf_size, crate::ptr::null_mut()) {
+                Ok(()) => unreachable!(),
+                Err(e) => match e.kind() {
+                    io::ErrorKind::InvalidData => {}
+                    _ => return Err(e),
+                },
+            }
+
+            let layout = Layout::from_size_align(buf_size, 8usize)
+                .map_err(|_| io::Error::new(io::ErrorKind::Other, "Invalid buffer size"))?;
+            let buf: NonNull<file::Info> = Global
+                .allocate(layout)
+                .map_err(|_| io::Error::new(io::ErrorKind::Other, "Failed to allocate Buffer"))?
+                .cast();
+
+            match inner(protocol, &mut buf_size, buf.as_ptr().cast()) {
+                Ok(()) => {}
+                Err(e) => {
+                    unsafe {
+                        Global.deallocate(buf.cast(), layout);
+                    }
+                    return Err(e);
+                }
+            }
+
+            Ok((buf, layout))
         }
 
         pub(crate) fn delete(self) -> io::Result<()> {
