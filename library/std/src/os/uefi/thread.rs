@@ -45,7 +45,6 @@ impl Event {
         if r.is_error() {
             match r {
                 Status::INVALID_PARAMETER => {
-                    println!("Event create error");
                     Err(io::Error::new(io::ErrorKind::InvalidInput, "EFI_INVALID_PARAMETER"))
                 }
                 Status::OUT_OF_RESOURCES => Err(io::Error::new(
@@ -78,7 +77,6 @@ impl Event {
         if r.is_error() {
             match r {
                 Status::INVALID_PARAMETER => {
-                    println!("Here");
                     Err(io::Error::new(io::ErrorKind::InvalidInput, "EFI_INVALID_PARAMETER"))
                 }
                 Status::UNSUPPORTED => Err(io::Error::new(
