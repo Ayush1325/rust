@@ -260,6 +260,7 @@
 #![feature(try_blocks)]
 #![feature(abi_efiapi)]
 #![feature(exclusive_range_pattern)]
+#![feature(const_option)]
 //
 // Library features (core):
 #![feature(array_error_internals)]

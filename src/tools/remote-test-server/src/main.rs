@@ -10,9 +10,9 @@
 //! themselves having support libraries. All data over the TCP sockets is in a
 //! basically custom format suiting our needs.
 
-#[cfg(not(windows))]
+#[cfg(not(any(target_os = "windows", target_os = "uefi")))]
 use std::fs::Permissions;
-#[cfg(not(windows))]
+#[cfg(not(any(target_os = "windows", target_os = "uefi")))]
 use std::os::unix::prelude::*;
 
 use std::cmp;
@@ -26,6 +26,7 @@ use std::process::{Command, ExitStatus, Stdio};
 use std::str;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+#[cfg(not(target_os = "uefi"))]
 use std::thread;
 
 macro_rules! t {
@@ -81,7 +82,11 @@ fn main() {
 
     let config = Config::parse_args();
 
-    let bind_addr = if cfg!(target_os = "android") || cfg!(windows) || config.remote {
+    let bind_addr = if cfg!(target_os = "android")
+        || cfg!(windows)
+        || cfg!(target_os = "uefi")
+        || config.remote
+    {
         "0.0.0.0:12345"
     } else {
         "10.0.2.15:12345"
@@ -90,6 +95,8 @@ fn main() {
     let listener = t!(TcpListener::bind(bind_addr));
     let (work, tmp): (PathBuf, PathBuf) = if cfg!(target_os = "android") {
         ("/data/tmp/work".into(), "/data/tmp/work/tmp".into())
+    } else if cfg!(target_os = "uefi") {
+        ("\\tmp\\work".into(), "\\tmp\\work\\tmp".into())
     } else {
         let mut work_dir = env::temp_dir();
         work_dir.push("work");
@@ -119,6 +126,9 @@ fn main() {
             let lock = lock.clone();
             let work = work.clone();
             let tmp = tmp.clone();
+            #[cfg(target_os = "uefi")]
+            handle_run(socket, &work, &tmp, &lock, config);
+            #[cfg(not(target_os = "uefi"))]
             thread::spawn(move || handle_run(socket, &work, &tmp, &lock, config));
         } else {
             panic!("unknown command {:?}", buf);
@@ -244,8 +254,12 @@ fn handle_run(socket: TcpStream, work: &Path, tmp: &Path, lock: &Mutex<()>, conf
     let mut stderr = child.stderr.take().unwrap();
     let socket = Arc::new(Mutex::new(reader.into_inner()));
     let socket2 = socket.clone();
+    #[cfg(target_os = "uefi")]
+    my_copy(&mut stdout, 0, &*socket2);
+    #[cfg(not(target_os = "uefi"))]
     let thread = thread::spawn(move || my_copy(&mut stdout, 0, &*socket2));
     my_copy(&mut stderr, 1, &*socket);
+    #[cfg(not(target_os = "uefi"))]
     thread.join().unwrap();
 
     // Finally send over the exit status.
@@ -262,7 +276,7 @@ fn handle_run(socket: TcpStream, work: &Path, tmp: &Path, lock: &Mutex<()>, conf
     ]));
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(target_os = "windows", target_os = "uefi")))]
 fn get_status_code(status: &ExitStatus) -> (u8, i32) {
     match status.code() {
         Some(n) => (0, n),
@@ -270,7 +284,7 @@ fn get_status_code(status: &ExitStatus) -> (u8, i32) {
     }
 }
 
-#[cfg(windows)]
+#[cfg(any(target_os = "windows", target_os = "uefi"))]
 fn get_status_code(status: &ExitStatus) -> (u8, i32) {
     (0, status.code().unwrap())
 }
@@ -296,11 +310,11 @@ fn recv<B: BufRead>(dir: &Path, io: &mut B) -> PathBuf {
     dst
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(target_os = "windows", target_os = "uefi")))]
 fn set_permissions(path: &Path) {
     t!(fs::set_permissions(&path, Permissions::from_mode(0o755)));
 }
-#[cfg(windows)]
+#[cfg(any(target_os = "windows", target_os = "uefi"))]
 fn set_permissions(_path: &Path) {}
 
 fn my_copy(src: &mut dyn Read, which: u8, dst: &Mutex<dyn Write>) {
