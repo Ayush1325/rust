@@ -82,11 +82,7 @@ fn main() {
 
     let config = Config::parse_args();
 
-    let bind_addr = if cfg!(target_os = "android")
-        || cfg!(windows)
-        || cfg!(target_os = "uefi")
-        || config.remote
-    {
+    let bind_addr = if cfg!(target_os = "android") || cfg!(windows) || config.remote {
         "0.0.0.0:12345"
     } else {
         "10.0.2.15:12345"
@@ -96,7 +92,7 @@ fn main() {
     let (work, tmp): (PathBuf, PathBuf) = if cfg!(target_os = "android") {
         ("/data/tmp/work".into(), "/data/tmp/work/tmp".into())
     } else if cfg!(target_os = "uefi") {
-        ("\\tmp\\work".into(), "\\tmp\\work\\tmp".into())
+        ("tmp\\work".into(), "tmp\\work\\tmp".into())
     } else {
         let mut work_dir = env::temp_dir();
         work_dir.push("work");
@@ -224,6 +220,14 @@ fn handle_run(socket: TcpStream, work: &Path, tmp: &Path, lock: &Mutex<()>, conf
     let exe = recv(&path, &mut reader);
     print_verbose(&format!("run {:#?}", exe), config);
 
+    // FIXME: Remove this in the future
+    #[cfg(target_os = "uefi")]
+    let exe = format!(
+        "{}/\\{}",
+        std::env::current_dir().unwrap().to_string_lossy(),
+        exe.to_string_lossy()
+    );
+
     let mut cmd = Command::new(&exe);
     cmd.args(args);
     cmd.envs(env);
@@ -240,6 +244,8 @@ fn handle_run(socket: TcpStream, work: &Path, tmp: &Path, lock: &Mutex<()>, conf
     if let Some(library_path) = env::var_os(library_path) {
         paths.extend(env::split_paths(&library_path));
     }
+    // Dynamic Linking not present in UEFI
+    #[cfg(not(target_os = "uefi"))]
     cmd.env(library_path, env::join_paths(paths).unwrap());
 
     // Some tests assume RUST_TEST_TMPDIR exists
@@ -250,6 +256,7 @@ fn handle_run(socket: TcpStream, work: &Path, tmp: &Path, lock: &Mutex<()>, conf
     let mut child =
         t!(cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn());
     drop(lock);
+
     let mut stdout = child.stdout.take().unwrap();
     let mut stderr = child.stderr.take().unwrap();
     let socket = Arc::new(Mutex::new(reader.into_inner()));
