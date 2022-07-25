@@ -1,6 +1,4 @@
-use crate::alloc::{Allocator, Global, Layout};
 use crate::io;
-use crate::ptr::NonNull;
 
 pub(crate) fn status_to_io_error(s: &r_efi::efi::Status) -> crate::io::Error {
     use io::ErrorKind;
