@@ -185,7 +185,7 @@ pub(crate) mod uefi_pipe {
                     buf,
                 )
             };
-            if r.is_error() { Err(status_to_io_error(&r)) } else { Ok(()) }
+            if r.is_error() { Err(status_to_io_error(r)) } else { Ok(()) }
         }
 
         pub fn write(&self, buf: &[u8]) -> io::Result<usize> {
@@ -220,7 +220,7 @@ pub(crate) mod uefi_pipe {
             let r = unsafe {
                 ((*runtime_services.as_ptr()).set_variable)(key, &mut guid, attr, buf_len, buf)
             };
-            if r.is_error() { Err(status_to_io_error(&r)) } else { Ok(()) }
+            if r.is_error() { Err(status_to_io_error(r)) } else { Ok(()) }
         }
     }
 }

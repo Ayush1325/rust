@@ -527,7 +527,7 @@ mod uefi_fs {
             };
 
             if r.is_error() {
-                Err(status_to_io_error(&r))
+                Err(status_to_io_error(r))
             } else {
                 let p = NonNull::new(unsafe { file_opened.assume_init() })
                     .ok_or(io::Error::new(io::ErrorKind::Other, "File is Null"))?;
@@ -541,7 +541,7 @@ mod uefi_fs {
 
             let r = unsafe { ((*protocol).set_position)(protocol, pos) };
 
-            if r.is_error() { Err(status_to_io_error(&r)) } else { Ok(pos) }
+            if r.is_error() { Err(status_to_io_error(r)) } else { Ok(pos) }
         }
 
         pub(crate) fn get_position(&self) -> io::Result<u64> {
@@ -550,7 +550,7 @@ mod uefi_fs {
 
             let r = unsafe { ((*protocol).get_position)(protocol, &mut pos) };
 
-            if r.is_error() { Err(status_to_io_error(&r)) } else { Ok(pos) }
+            if r.is_error() { Err(status_to_io_error(r)) } else { Ok(pos) }
         }
 
         pub(crate) fn write(&self, buf: &[u8]) -> io::Result<usize> {
@@ -566,7 +566,7 @@ mod uefi_fs {
                 )
             };
 
-            if r.is_error() { Err(status_to_io_error(&r)) } else { Ok(buffer_size) }
+            if r.is_error() { Err(status_to_io_error(r)) } else { Ok(buffer_size) }
         }
 
         unsafe fn raw_read(
@@ -576,7 +576,7 @@ mod uefi_fs {
         ) -> io::Result<()> {
             let r = unsafe { ((*protocol).read)(protocol, buf_size, buf) };
 
-            if r.is_error() { Err(status_to_io_error(&r)) } else { Ok(()) }
+            if r.is_error() { Err(status_to_io_error(r)) } else { Ok(()) }
         }
 
         pub(crate) fn read<T>(&self, buf: &mut [T], buffer_size: &mut usize) -> io::Result<()> {
@@ -589,7 +589,7 @@ mod uefi_fs {
 
             let r = unsafe { ((*protocol).flush)(protocol) };
 
-            if r.is_error() { Err(status_to_io_error(&r)) } else { Ok(()) }
+            if r.is_error() { Err(status_to_io_error(r)) } else { Ok(()) }
         }
 
         pub fn read_dir_entry(&self) -> Option<io::Result<DirEntry>> {
@@ -678,7 +678,7 @@ mod uefi_fs {
         ) -> io::Result<()> {
             let mut info_guid = file::INFO_ID;
             let r = unsafe { ((*protocol).get_info)(protocol, &mut info_guid, buf_size, buf) };
-            if r.is_error() { Err(status_to_io_error(&r)) } else { Ok(()) }
+            if r.is_error() { Err(status_to_io_error(r)) } else { Ok(()) }
         }
 
         pub(crate) fn delete(self) -> io::Result<()> {

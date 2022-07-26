@@ -221,13 +221,13 @@ impl ExitStatus {
 
 impl fmt::Debug for ExitStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(&super::common::status_to_io_error(&self.0), f)
+        fmt::Debug::fmt(&super::common::status_to_io_error(self.0), f)
     }
 }
 
 impl fmt::Display for ExitStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&super::common::status_to_io_error(&self.0), f)
+        fmt::Display::fmt(&super::common::status_to_io_error(self.0), f)
     }
 }
 
@@ -354,7 +354,7 @@ mod uefi_command {
                 )
             };
             if r.is_error() {
-                Err(super::super::common::status_to_io_error(&r))
+                Err(super::super::common::status_to_io_error(r))
             } else {
                 let child_handle = unsafe { child_handle.assume_init() };
                 match NonNull::new(child_handle) {

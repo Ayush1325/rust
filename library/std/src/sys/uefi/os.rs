@@ -179,7 +179,7 @@ pub(crate) mod uefi_vars {
             )
         };
 
-        if r.is_error() { Err(common::status_to_io_error(&r)) } else { Ok(()) }
+        if r.is_error() { Err(common::status_to_io_error(r)) } else { Ok(()) }
     }
 
     pub fn get_variable(key: &OsStr) -> Option<OsString> {
