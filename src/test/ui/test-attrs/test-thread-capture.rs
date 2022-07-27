@@ -5,6 +5,7 @@
 // exec-env:RUST_BACKTRACE=0
 // normalize-stdout-test "finished in \d+\.\d+s" -> "finished in $$TIME"
 // ignore-emscripten no threads support
+// ignore-uefi no threads support
 
 #[test]
 fn thready_pass() {
