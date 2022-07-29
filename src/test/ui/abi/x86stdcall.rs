@@ -34,5 +34,6 @@ pub fn main() {
           target_os = "netbsd",
           target_os = "openbsd",
           target_os = "solaris",
-          target_os = "vxworks"))]
+          target_os = "vxworks",
+          target_os = "uefi"))]
 pub fn main() { }
