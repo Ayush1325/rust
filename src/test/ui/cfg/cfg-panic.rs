@@ -4,6 +4,7 @@
 // ignore-emscripten no panic_unwind implementation
 // ignore-wasm32     no panic_unwind implementation
 // ignore-wasm64     no panic_unwind implementation
+// ignore-uefi     no panic_unwind implementation
 
 
 #[cfg(panic = "abort")]

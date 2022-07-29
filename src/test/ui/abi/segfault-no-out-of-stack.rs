@@ -3,6 +3,7 @@
 #![allow(unused_imports)]
 // ignore-emscripten can't run commands
 // ignore-sgx no processes
+// ignore-uefi no libc
 #![feature(rustc_private)]
 
 extern crate libc;
