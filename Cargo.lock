@@ -792,7 +792,7 @@ dependencies = [
 [[package]]
 name = "compiler_builtins"
 version = "0.1.73"
-source = "git+https://github.com/Ayush1325/compiler-builtins?branch=uefi-std#7eb578cb99e6cab15d84b6bde1a2e33fa6e95624"
+source = "git+https://github.com/Ayush1325/compiler-builtins?branch=uefi-std#34d0f8e15b08f563cd034555b41eac586e156185"
 dependencies = [
  "cc",
  "rustc-std-workspace-core",
