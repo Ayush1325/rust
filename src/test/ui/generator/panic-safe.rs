@@ -2,6 +2,7 @@
 // needs-unwind
 
 // ignore-wasm32-bare compiled with panic=abort by default
+// ignore-uefi compiled with panic=abort by default
 
 #![feature(generators, generator_trait)]
 

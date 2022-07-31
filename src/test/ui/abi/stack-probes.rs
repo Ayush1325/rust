@@ -10,6 +10,7 @@
 // ignore-wasm
 // ignore-emscripten no processes
 // ignore-sgx no processes
+// ignore-uefi no rust_test_helpers
 
 use std::env;
 use std::mem::MaybeUninit;

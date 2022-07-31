@@ -2,6 +2,7 @@
 // run-pass
 // needs-unwind
 // ignore-emscripten no subprocess support
+// ignore-uefi no unwind support
 
 use std::fmt;
 use std::fmt::{Display, Formatter};

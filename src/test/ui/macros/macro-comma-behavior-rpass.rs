@@ -15,6 +15,7 @@
 // revisions: std core
 
 // ignore-wasm32-bare compiled with panic=abort by default
+// ignore-uefi compiled with panic=abort by default
 #![cfg_attr(core, no_std)]
 
 #[cfg(core)]

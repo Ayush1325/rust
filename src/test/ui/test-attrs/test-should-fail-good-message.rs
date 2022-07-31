@@ -1,6 +1,7 @@
 // run-pass
 // needs-unwind
 // ignore-wasm32-bare compiled with panic=abort by default
+// ignore-uefi compiled with panic=abort by default
 // compile-flags: --test
 #[test]
 #[should_panic(expected = "foo")]

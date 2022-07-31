@@ -3,6 +3,7 @@
 // error-pattern: language item required, but not found: `eh_personality`
 // needs-unwind since it affects the error output
 // ignore-emscripten compiled with panic=abort, personality not required
+// ignore-uefi compiled with panic=abort, personality not required
 
 #![no_std]
 

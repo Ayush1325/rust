@@ -1,6 +1,7 @@
 // run-pass
 // needs-unwind
 // ignore-emscripten no subprocess support
+// ignore-uefi no unwind support
 
 #![feature(internal_output_capture)]
 
@@ -19,8 +20,10 @@ impl Display for A {
 
 fn main() {
     set_output_capture(Some(Arc::new(Mutex::new(Vec::new()))));
-    assert!(std::panic::catch_unwind(|| {
-        eprintln!("{}", A);
-    })
-    .is_err());
+    assert!(
+        std::panic::catch_unwind(|| {
+            eprintln!("{}", A);
+        })
+        .is_err()
+    );
 }

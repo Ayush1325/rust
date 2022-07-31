@@ -11,6 +11,7 @@
 // ignore-emscripten no processes
 // ignore-sgx no processes
 // ignore-musl FIXME #31506
+// ignore-uefi no rust_test_helpers
 // ignore-pretty
 // compile-flags: -C lto
 // no-prefer-dynamic

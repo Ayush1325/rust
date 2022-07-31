@@ -5,6 +5,7 @@
 // ignore-wasm32-bare no unwinding panic
 // ignore-avr no unwinding panic
 // ignore-nvptx64 no unwinding panic
+// ignore-uefi no unwinding panic
 
 use std::env;
 use std::process::Command;

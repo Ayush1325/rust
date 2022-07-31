@@ -2,6 +2,7 @@
 // needs-unwind
 // ignore-windows target requires uwtable
 // ignore-wasm32-bare no proper panic=unwind support
+// ignore-uefi no proper panic=unwind support
 // compile-flags: -C panic=unwind -C force-unwind-tables=n
 
 use std::panic::{self, AssertUnwindSafe};

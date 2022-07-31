@@ -4,6 +4,7 @@
 // needs-unwind
 // ignore-wasm       no unwind support
 // ignore-emscripten no unwind support
+// ignore-uefi no unwind support
 
 #![feature(generators, generator_trait)]
 
