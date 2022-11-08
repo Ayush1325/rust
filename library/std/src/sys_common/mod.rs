@@ -20,6 +20,8 @@
 #[cfg(test)]
 mod tests;
 
+#[cfg(target_os = "windows")]
+pub mod args;
 pub mod backtrace;
 pub mod condvar;
 pub mod fs;
